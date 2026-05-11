@@ -1,0 +1,20 @@
+[server]
+# Railway sets $PORT — supervisord passes it via --server.port flag.
+# This file covers local runs and fallback defaults.
+headless = true
+address = "0.0.0.0"
+port = 8501
+fileWatcherType = "none"    # disable inotify — not needed in production
+enableCORS = false
+enableXsrfProtection = true
+
+[browser]
+gatherUsageStats = false
+serverAddress = "0.0.0.0"
+
+[theme]
+base = "dark"
+primaryColor = "#667eea"
+backgroundColor = "#0e1117"
+secondaryBackgroundColor = "#1a1d2e"
+textColor = "#fafafa"

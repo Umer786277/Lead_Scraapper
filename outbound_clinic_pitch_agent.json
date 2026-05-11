@@ -1,0 +1,674 @@
+{
+  "agent_id": "",
+  "channel": "voice",
+  "agent_name": "Outbound Clinic Pitch — AI Receptionist",
+  "response_engine": {
+    "type": "conversation-flow",
+    "version": 1,
+    "conversation_flow_id": "conversation_flow_outbound_pitch_v1"
+  },
+  "language": "en-US",
+  "data_storage_setting": "everything",
+  "end_call_after_silence_ms": 30000,
+  "version": 1,
+  "is_published": false,
+  "post_call_analysis_model": "gpt-4.1-mini",
+  "analysis_successful_prompt": "A successful call ends with one of: (1) a booked demo, (2) an email captured for follow-up, (3) a scheduled callback, or (4) a clear not-interested close. Voicemail drops count as partial success if the message was delivered.",
+  "analysis_summary_prompt": "Write a 1-3 sentence summary capturing: who we spoke with (owner / manager / gatekeeper / voicemail), their current call-handling setup if mentioned, and the outcome (demo booked / email captured / callback / declined / voicemail).",
+  "analysis_user_sentiment_prompt": "Evaluate the prospect's receptiveness — warm, neutral, cold — and whether they seemed like a real decision-maker or a gatekeeper.",
+  "reminder_trigger_ms": 8000,
+  "reminder_max_count": 1,
+  "max_call_duration_ms": 300000,
+  "interruption_sensitivity": 0.85,
+  "stt_mode": "accurate",
+  "vocab_specialization": "general",
+  "allow_user_dtmf": false,
+  "denoising_mode": "noise-and-background-speech-cancellation",
+  "conversationFlow": {
+    "conversation_flow_id": "conversation_flow_outbound_pitch_v1",
+    "version": 1,
+    "global_prompt": "You are Alex, a friendly outbound SDR calling on behalf of {{company_name}}. You are calling {{business_name}}, a veterinary clinic, to introduce an AI voice receptionist service that handles bookings, medication requests, pricing enquiries, and after-hours calls — the same problems their front desk deals with every day.\n\n1. SPEECH RULES\n* NEVER use filler words like 'um', 'uh', 'hmm', 'like'.\n* Speak warmly, conversationally — not scripted or salesy.\n* Keep every turn under 2 sentences unless pitching value.\n* If the prospect interrupts, stop and listen.\n* NEVER claim to be human. If asked: 'I'm an AI assistant calling on behalf of {{company_name}} — ironically, the same kind of tech we help clinics deploy.'\n\n2. BEHAVIOR RULES\n* Follow only the node flow.\n* Respect a 'no' fast — one soft re-frame max, then graceful exit.\n* If the person says they're not the decision-maker, ask for the best email/name and exit politely.\n* If you reach voicemail, leave the scripted voicemail and end the call.\n* NEVER argue, pressure, or repeat the pitch.\n* NEVER promise pricing on the call — defer to the demo.\n\n3. OFFER SUMMARY (do not read verbatim — paraphrase)\n* AI voice receptionist purpose-built for vet / pet clinics.\n* Handles inbound calls 24/7: bookings, medication refills, price enquiries, triage, transfers.\n* Integrates with practice management systems (ezyVet, Provet Cloud, etc.).\n* Clinics typically recover 15–30% of previously-missed calls.\n* Free 15-minute demo tailored to their practice.\n\n4. CALL METADATA\n* call_sid: {{call_id}} — pass to all MCP tools.\n* lead_phone: {{to_number}}\n* lead_business_name: {{business_name}}\n* lead_city: {{business_city}}\n\n5. MCP TOOLS\n* book_demo — schedules a 15-min demo on the sales calendar.\n* capture_lead — stores lead details (name, email, business, notes) into CRM for follow-up.",
+    "nodes": [
+      {
+        "name": "GREETING",
+        "id": "node-greeting",
+        "type": "conversation",
+        "display_position": { "x": 0, "y": 0 },
+        "instruction": {
+          "type": "prompt",
+          "text": "Say: \"Hi there, this is Alex calling from {{company_name}} — am I through to {{business_name}}?\"\n\nListen for:\n- A human confirming the clinic → continue.\n- Voicemail / answering machine beep or greeting → transition to voicemail.\n- Wrong number / 'you have the wrong place' → apologize and end.\n\nDo not launch into a pitch yet. Just confirm you've reached the right place."
+        },
+        "edges": [
+          {
+            "destination_node_id": "node-voicemail-message",
+            "id": "edge-g-voicemail",
+            "transition_condition": {
+              "type": "prompt",
+              "prompt": "Detected voicemail / answering machine greeting or prompt to leave a message"
+            }
+          },
+          {
+            "destination_node_id": "node-wrong-number",
+            "id": "edge-g-wrong",
+            "transition_condition": {
+              "type": "prompt",
+              "prompt": "Person says wrong number, don't know that business, or it's a personal line not the clinic"
+            }
+          },
+          {
+            "destination_node_id": "node-ask-time",
+            "id": "edge-g-confirmed",
+            "transition_condition": {
+              "type": "prompt",
+              "prompt": "Person confirms it's the clinic, or it's clearly the clinic's front desk"
+            }
+          }
+        ]
+      },
+      {
+        "name": "Ask Is This A Good Time",
+        "id": "node-ask-time",
+        "type": "conversation",
+        "display_position": { "x": 1000, "y": 0 },
+        "instruction": {
+          "type": "prompt",
+          "text": "Say: \"Brilliant. I know you weren't expecting my call — do you have about 60 seconds, or is there a better time to catch whoever runs the clinic?\"\n\nKeep it low-pressure. If they sound rushed, accept immediately and offer to call back."
+        },
+        "edges": [
+          {
+            "destination_node_id": "node-gatekeeper-ask",
+            "id": "edge-at-gatekeeper",
+            "transition_condition": {
+              "type": "prompt",
+              "prompt": "Person indicates they're not the owner/manager/decision-maker (e.g. 'I'm the receptionist', 'I just work the front desk', 'the manager isn't in')"
+            }
+          },
+          {
+            "destination_node_id": "node-callback-schedule",
+            "id": "edge-at-bad-time",
+            "transition_condition": {
+              "type": "prompt",
+              "prompt": "Person says it's a bad time, they're busy, call back later, with a client, in surgery"
+            }
+          },
+          {
+            "destination_node_id": "node-pitch-hook",
+            "id": "edge-at-yes",
+            "transition_condition": {
+              "type": "prompt",
+              "prompt": "Person says yes, sure, go ahead, what is it, briefly — or sounds receptive"
+            }
+          },
+          {
+            "destination_node_id": "node-polite-close",
+            "id": "edge-at-hard-no",
+            "transition_condition": {
+              "type": "prompt",
+              "prompt": "Person says no, not interested, remove me, don't call back, or sounds clearly hostile"
+            }
+          }
+        ]
+      },
+      {
+        "name": "Gatekeeper — Ask for Decision Maker",
+        "id": "node-gatekeeper-ask",
+        "type": "conversation",
+        "display_position": { "x": 2000, "y": -400 },
+        "instruction": {
+          "type": "prompt",
+          "text": "Say: \"No worries — who would be the best person to speak to about how the clinic handles incoming calls? And is there an email I could send a short intro to so I'm not interrupting the practice?\"\n\nGoal: capture the decision-maker's name and an email. Do NOT pitch further to the gatekeeper. Be warm, brief, and grateful."
+        },
+        "edges": [
+          {
+            "destination_node_id": "node-extract-lead-vars",
+            "id": "edge-gk-captured",
+            "transition_condition": {
+              "type": "prompt",
+              "prompt": "After gatekeeper provides a name and/or email, OR declines to share any details"
+            }
+          }
+        ]
+      },
+      {
+        "name": "Pitch Hook",
+        "id": "node-pitch-hook",
+        "type": "conversation",
+        "display_position": { "x": 2000, "y": 400 },
+        "instruction": {
+          "type": "prompt",
+          "text": "Say: \"Appreciate it. Quick reason for the call — we built an AI phone receptionist specifically for vet clinics. It handles bookings, medication refills, and price enquiries, including after hours and when the front desk is slammed. Most of our clinics recover 15 to 30 percent of calls they were quietly missing. Is missed calls or after-hours cover something that's ever been on your radar?\"\n\nPause and let them respond. Do NOT keep talking."
+        },
+        "edges": [
+          {
+            "destination_node_id": "node-qualify",
+            "id": "edge-ph-engaged",
+            "transition_condition": {
+              "type": "prompt",
+              "prompt": "Prospect engages — asks a question, says 'yes we do miss calls', shares any pain, or shows curiosity"
+            }
+          },
+          {
+            "destination_node_id": "node-objection-handle",
+            "id": "edge-ph-objection",
+            "transition_condition": {
+              "type": "prompt",
+              "prompt": "Prospect raises an objection — already have a service, not interested, too expensive, AI concerns, or uses our own provider"
+            }
+          },
+          {
+            "destination_node_id": "node-polite-close",
+            "id": "edge-ph-hard-no",
+            "transition_condition": {
+              "type": "prompt",
+              "prompt": "Prospect clearly says no thanks, not interested, don't call back"
+            }
+          }
+        ]
+      },
+      {
+        "name": "Qualify",
+        "id": "node-qualify",
+        "type": "conversation",
+        "display_position": { "x": 3000, "y": 400 },
+        "instruction": {
+          "type": "prompt",
+          "text": "Say: \"How are you currently handling calls after hours or when the team's tied up with patients?\"\n\nListen for pain signals — voicemail only, an answering service, 'calls just go unanswered', missed appointments. Reflect back what they say briefly before offering the demo."
+        },
+        "edges": [
+          {
+            "destination_node_id": "node-offer-demo",
+            "id": "edge-q-to-demo",
+            "transition_condition": {
+              "type": "prompt",
+              "prompt": "After prospect describes current setup or pain points"
+            }
+          }
+        ]
+      },
+      {
+        "name": "Objection Handler",
+        "id": "node-objection-handle",
+        "type": "conversation",
+        "display_position": { "x": 3000, "y": 800 },
+        "instruction": {
+          "type": "prompt",
+          "text": "Respond to the specific objection in ONE sentence, then ask if they'd be open to seeing it.\n\nCommon objections:\n- 'We already have an answering service' → \"Totally — most clinics we work with had one. The difference is ours actually books into your practice system, not just takes messages. Worth a 15-minute look?\"\n- 'Sounds expensive' → \"It's usually less than one missed surgery a month. Happy to show you the numbers on a quick demo.\"\n- 'We don't want AI talking to clients' → \"Fair — clients are the first thing we test. Our vet clinics typically tell us callers don't realize until we point it out. Want to hear a 60-second sample?\"\n- 'Send me an email' → transition to capture_lead.\n\nIf they stay resistant after one reframe, transition to polite close. DO NOT push twice."
+        },
+        "edges": [
+          {
+            "destination_node_id": "node-offer-demo",
+            "id": "edge-oh-open",
+            "transition_condition": {
+              "type": "prompt",
+              "prompt": "Prospect becomes open to a demo after the reframe"
+            }
+          },
+          {
+            "destination_node_id": "node-extract-lead-vars",
+            "id": "edge-oh-email",
+            "transition_condition": {
+              "type": "prompt",
+              "prompt": "Prospect asks us to email them information instead"
+            }
+          },
+          {
+            "destination_node_id": "node-polite-close",
+            "id": "edge-oh-still-no",
+            "transition_condition": {
+              "type": "prompt",
+              "prompt": "Prospect remains not interested after the reframe"
+            }
+          }
+        ]
+      },
+      {
+        "name": "Offer Demo",
+        "id": "node-offer-demo",
+        "type": "conversation",
+        "display_position": { "x": 4000, "y": 400 },
+        "instruction": {
+          "type": "prompt",
+          "text": "Say: \"What I'd love to do is grab 15 minutes to show you a live demo tailored to {{business_name}} — you'd hear how it handles your exact intake. Any days that are easier — earlier in the week or toward the end?\"\n\nGoal: get a day preference. Don't propose specific times yet."
+        },
+        "edges": [
+          {
+            "destination_node_id": "node-collect-demo-details",
+            "id": "edge-od-yes",
+            "transition_condition": {
+              "type": "prompt",
+              "prompt": "Prospect agrees to a demo and indicates any day/time preference"
+            }
+          },
+          {
+            "destination_node_id": "node-extract-lead-vars",
+            "id": "edge-od-email-only",
+            "transition_condition": {
+              "type": "prompt",
+              "prompt": "Prospect prefers to get info by email first before committing to a demo"
+            }
+          },
+          {
+            "destination_node_id": "node-polite-close",
+            "id": "edge-od-no",
+            "transition_condition": {
+              "type": "prompt",
+              "prompt": "Prospect declines the demo outright"
+            }
+          }
+        ]
+      },
+      {
+        "name": "Collect Demo Details",
+        "id": "node-collect-demo-details",
+        "type": "conversation",
+        "display_position": { "x": 5000, "y": 400 },
+        "instruction": {
+          "type": "prompt",
+          "text": "Collect in order, natural conversational flow — do not list them robotically:\n1. Their name (if not already given).\n2. Their role at the clinic.\n3. Their email address (have them spell it back; confirm digit/letter-by-letter if unclear).\n4. Preferred day and rough time window for the demo.\n\nSay: \"Perfect — could I grab your name and the best email to send the calendar invite to?\"\n\nOnce you have email, confirm: \"So that's [spell the email back letter by letter]. Right?\""
+        },
+        "edges": [
+          {
+            "destination_node_id": "node-extract-demo-vars",
+            "id": "edge-cdd-captured",
+            "transition_condition": {
+              "type": "prompt",
+              "prompt": "After collecting name, email, and preferred time window"
+            }
+          }
+        ]
+      },
+      {
+        "name": "Extract Demo Variables",
+        "id": "node-extract-demo-vars",
+        "type": "extract_dynamic_variables",
+        "display_position": { "x": 6000, "y": 400 },
+        "variables": [
+          {
+            "name": "contact_name",
+            "description": "Full name of the person we're booking the demo with",
+            "type": "string",
+            "examples": ["Sarah Mitchell", "Dr James Chen"]
+          },
+          {
+            "name": "contact_role",
+            "description": "Their role at the clinic",
+            "type": "string",
+            "examples": ["practice owner", "practice manager", "lead vet"]
+          },
+          {
+            "name": "contact_email",
+            "description": "Validated email address — lowercase, no spaces",
+            "type": "string",
+            "examples": ["sarah@londonvet.co.uk"]
+          },
+          {
+            "name": "preferred_demo_window",
+            "description": "Caller's preferred day and rough time for the demo",
+            "type": "string",
+            "examples": ["Tuesday afternoon", "end of next week", "Wednesday 10am"]
+          },
+          {
+            "name": "business_name",
+            "description": "Name of the clinic",
+            "type": "string",
+            "choices": []
+          },
+          {
+            "name": "lead_phone",
+            "description": "Use from {{to_number}}",
+            "type": "string",
+            "choices": []
+          },
+          {
+            "name": "call_sid",
+            "description": "Use from {{call_id}}",
+            "type": "string",
+            "choices": []
+          }
+        ],
+        "edges": [
+          {
+            "destination_node_id": "node-mcp-book-demo",
+            "id": "edge-edv-to-mcp",
+            "transition_condition": {
+              "type": "prompt",
+              "prompt": "After extracting all variables"
+            }
+          }
+        ],
+        "else_edge": {
+          "id": "node-extract-demo-vars-else",
+          "transition_condition": {
+            "type": "prompt",
+            "prompt": "Else"
+          }
+        }
+      },
+      {
+        "name": "MCP — Book Demo",
+        "id": "node-mcp-book-demo",
+        "type": "mcp",
+        "mcp_id": "mcp-sales-calendar",
+        "mcp_tool_name": "book_demo",
+        "display_position": { "x": 7000, "y": 400 },
+        "speak_during_execution": false,
+        "wait_for_result": true,
+        "response_variables": {
+          "confirmed_slot": "confirmed_slot"
+        },
+        "edges": [
+          {
+            "destination_node_id": "node-demo-confirm",
+            "id": "edge-mbd-success",
+            "transition_condition": {
+              "type": "prompt",
+              "prompt": "Booking was successful"
+            }
+          },
+          {
+            "destination_node_id": "node-demo-fallback",
+            "id": "edge-mbd-failed",
+            "transition_condition": {
+              "type": "prompt",
+              "prompt": "Booking failed or returned an error"
+            }
+          }
+        ],
+        "else_edge": {
+          "id": "node-mcp-book-demo-else",
+          "transition_condition": {
+            "type": "prompt",
+            "prompt": "Else"
+          }
+        }
+      },
+      {
+        "name": "Demo Confirmed",
+        "id": "node-demo-confirm",
+        "type": "conversation",
+        "display_position": { "x": 8000, "y": 200 },
+        "instruction": {
+          "type": "prompt",
+          "text": "Say: \"Brilliant, {{contact_name}} — you're booked in for [confirmed_slot in natural language]. I'll send a calendar invite to {{contact_email}} in the next few minutes. Anything specific you want us to cover on the demo?\"\n\nKeep the close warm and brief."
+        },
+        "edges": [
+          {
+            "destination_node_id": "node-ending",
+            "id": "edge-dc-to-end",
+            "transition_condition": {
+              "type": "prompt",
+              "prompt": "After prospect responds"
+            }
+          }
+        ]
+      },
+      {
+        "name": "Demo Booking Fallback",
+        "id": "node-demo-fallback",
+        "type": "conversation",
+        "display_position": { "x": 8000, "y": 600 },
+        "instruction": {
+          "type": "prompt",
+          "text": "Say: \"My calendar's just hiccupped — let me take this down manually and our team will email you confirmation within the hour. Sound good?\""
+        },
+        "edges": [
+          {
+            "destination_node_id": "node-extract-lead-vars",
+            "id": "edge-df-to-capture",
+            "transition_condition": {
+              "type": "prompt",
+              "prompt": "After prospect agrees"
+            }
+          }
+        ]
+      },
+      {
+        "name": "Extract Lead Variables",
+        "id": "node-extract-lead-vars",
+        "type": "extract_dynamic_variables",
+        "display_position": { "x": 6000, "y": 1200 },
+        "variables": [
+          {
+            "name": "contact_name",
+            "description": "Name captured during the call (may be the gatekeeper, decision-maker, or prospect). Leave blank if not shared.",
+            "type": "string",
+            "examples": ["Sarah", "Dr Chen", ""]
+          },
+          {
+            "name": "contact_email",
+            "description": "Email captured for follow-up. Leave blank if not shared.",
+            "type": "string",
+            "examples": ["info@londonvet.co.uk", ""]
+          },
+          {
+            "name": "lead_notes",
+            "description": "Short free-text summary of what the prospect said: current setup, objections, interest level, callback request etc.",
+            "type": "string",
+            "examples": ["Gatekeeper, owner is Sarah, prefers email follow-up", "Not interested — uses human answering service and happy with it"]
+          },
+          {
+            "name": "lead_status",
+            "description": "Outcome classification for the CRM.",
+            "type": "enum",
+            "choices": ["warm_demo_booked", "warm_email_follow_up", "cold_callback_scheduled", "not_interested", "gatekeeper_only", "wrong_number", "voicemail_dropped"]
+          },
+          {
+            "name": "business_name",
+            "description": "Name of the clinic",
+            "type": "string",
+            "choices": []
+          },
+          {
+            "name": "lead_phone",
+            "description": "Use from {{to_number}}",
+            "type": "string",
+            "choices": []
+          },
+          {
+            "name": "call_sid",
+            "description": "Use from {{call_id}}",
+            "type": "string",
+            "choices": []
+          }
+        ],
+        "edges": [
+          {
+            "destination_node_id": "node-mcp-capture-lead",
+            "id": "edge-elv-to-mcp",
+            "transition_condition": {
+              "type": "prompt",
+              "prompt": "After extracting all variables"
+            }
+          }
+        ],
+        "else_edge": {
+          "id": "node-extract-lead-vars-else",
+          "transition_condition": {
+            "type": "prompt",
+            "prompt": "Else"
+          }
+        }
+      },
+      {
+        "name": "MCP — Capture Lead",
+        "id": "node-mcp-capture-lead",
+        "type": "mcp",
+        "mcp_id": "mcp-crm",
+        "mcp_tool_name": "capture_lead",
+        "display_position": { "x": 7000, "y": 1200 },
+        "speak_during_execution": false,
+        "wait_for_result": false,
+        "response_variables": {},
+        "edges": [
+          {
+            "destination_node_id": "node-email-confirm-close",
+            "id": "edge-mcl-done",
+            "transition_condition": {
+              "type": "prompt",
+              "prompt": "After capture completes"
+            }
+          }
+        ],
+        "else_edge": {
+          "id": "node-mcp-capture-lead-else",
+          "transition_condition": {
+            "type": "prompt",
+            "prompt": "Else"
+          }
+        }
+      },
+      {
+        "name": "Email Follow-up Close",
+        "id": "node-email-confirm-close",
+        "type": "conversation",
+        "display_position": { "x": 8000, "y": 1200 },
+        "instruction": {
+          "type": "prompt",
+          "text": "Say: \"Perfect — I'll get a short intro over to {{contact_email}} today. Thanks so much for your time, and have a great one!\""
+        },
+        "edges": [],
+        "skip_response_edge": {
+          "destination_node_id": "node-ending",
+          "id": "skip-ecc-to-end",
+          "transition_condition": {
+            "type": "prompt",
+            "prompt": "Skip response"
+          }
+        }
+      },
+      {
+        "name": "Callback Schedule",
+        "id": "node-callback-schedule",
+        "type": "conversation",
+        "display_position": { "x": 2000, "y": 1400 },
+        "instruction": {
+          "type": "prompt",
+          "text": "Say: \"Totally understand. When's generally a calmer moment — mornings before surgery, or later afternoon?\"\n\nCapture a rough window and confirm we'll call back then."
+        },
+        "edges": [
+          {
+            "destination_node_id": "node-extract-lead-vars",
+            "id": "edge-cs-captured",
+            "transition_condition": {
+              "type": "prompt",
+              "prompt": "After prospect provides a callback window"
+            }
+          }
+        ]
+      },
+      {
+        "name": "Voicemail Message",
+        "id": "node-voicemail-message",
+        "type": "conversation",
+        "display_position": { "x": 1000, "y": -800 },
+        "instruction": {
+          "type": "prompt",
+          "text": "Wait for the voicemail beep, then say: \"Hi, this is Alex from {{company_name}} — we help vet clinics handle after-hours and overflow calls with an AI receptionist that books straight into your practice system. No pressure, but if that's something worth a 15-minute look, I'd love to send over a short intro. I'll try you again in a few days. Cheers!\"\n\nThen end the call."
+        },
+        "edges": [],
+        "skip_response_edge": {
+          "destination_node_id": "node-ending",
+          "id": "skip-vm-to-end",
+          "transition_condition": {
+            "type": "prompt",
+            "prompt": "Skip response"
+          }
+        }
+      },
+      {
+        "name": "Wrong Number Close",
+        "id": "node-wrong-number",
+        "type": "conversation",
+        "display_position": { "x": 1000, "y": 800 },
+        "instruction": {
+          "type": "prompt",
+          "text": "Say: \"Apologies for the mix-up — I'll get this removed from our list. Have a good one!\"\n\nDo NOT pitch. End immediately."
+        },
+        "edges": [],
+        "skip_response_edge": {
+          "destination_node_id": "node-ending",
+          "id": "skip-wn-to-end",
+          "transition_condition": {
+            "type": "prompt",
+            "prompt": "Skip response"
+          }
+        }
+      },
+      {
+        "name": "Polite Close",
+        "id": "node-polite-close",
+        "type": "conversation",
+        "display_position": { "x": 4000, "y": 1600 },
+        "instruction": {
+          "type": "prompt",
+          "text": "Say: \"No worries at all — appreciate you taking the call. Have a great rest of your day!\"\n\nDo NOT pitch further. Do NOT offer to send info. End warmly."
+        },
+        "edges": [],
+        "skip_response_edge": {
+          "destination_node_id": "node-ending",
+          "id": "skip-pc-to-end",
+          "transition_condition": {
+            "type": "prompt",
+            "prompt": "Skip response"
+          }
+        }
+      },
+      {
+        "name": "Ending",
+        "id": "node-ending",
+        "type": "end",
+        "display_position": { "x": 9500, "y": 600 },
+        "instruction": {
+          "type": "prompt",
+          "text": "End the call."
+        }
+      }
+    ],
+    "start_node_id": "node-greeting",
+    "start_speaker": "agent",
+    "model_choice": {
+      "type": "cascading",
+      "model": "gpt-4.1"
+    },
+    "model_temperature": 0.5,
+    "tool_call_strict_mode": true,
+    "default_dynamic_variables": {
+      "company_name": "YOUR_COMPANY_NAME",
+      "business_name": "the clinic",
+      "business_city": "",
+      "call_sid": "{{call_id}}",
+      "user_number": "{{to_number}}"
+    },
+    "knowledge_base_ids": [],
+    "kb_config": {
+      "top_k": 3,
+      "filter_score": 0.6
+    },
+    "mcps": [
+      {
+        "name": "Sales Calendar — Demo Booking",
+        "id": "mcp-sales-calendar",
+        "headers": {
+          "Authorization": "Bearer YOUR_SALES_CALENDAR_MCP_TOKEN"
+        },
+        "query_params": {},
+        "url": "https://YOUR-SALES-CALENDAR-MCP-URL/mcp/",
+        "timeout_ms": 12000
+      },
+      {
+        "name": "CRM — Lead Capture",
+        "id": "mcp-crm",
+        "headers": {
+          "Authorization": "Bearer YOUR_CRM_MCP_TOKEN"
+        },
+        "query_params": {},
+        "url": "https://YOUR-CRM-MCP-URL/mcp/",
+        "timeout_ms": 10000
+      }
+    ],
+    "flex_mode": false,
+    "is_transfer_cf": false,
+    "is_published": false,
+    "begin_tag_display_position": { "x": -600, "y": 0 }
+  }
+}

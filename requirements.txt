@@ -1,0 +1,25 @@
+# Scraping + extraction
+playwright>=1.44.0
+dnspython>=2.4.0
+
+# Database
+psycopg[binary]>=3.1.0
+
+# Automation worker
+apscheduler>=3.10.0
+
+# FastAPI backend
+fastapi>=0.111.0
+uvicorn[standard]>=0.29.0
+python-jose[cryptography]>=3.3.0  # JWT verification (Supabase tokens)
+python-multipart>=0.0.9            # form data support
+
+# AI / outreach
+openai>=1.0.0
+
+# Data + utilities
+pandas>=2.0.0
+requests>=2.31.0
+
+# Legacy Streamlit (keep while transitioning to Next.js)
+streamlit>=1.35.0
