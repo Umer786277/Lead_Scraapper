@@ -1,0 +1,43 @@
+services:
+  # ── FastAPI backend ──────────────────────────────────────────
+  - type: web
+    name: leadflow-api
+    runtime: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn api.main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: DATABASE_URL
+        sync: false
+      - key: SUPABASE_JWT_SECRET
+        sync: false
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: TAVILY_API_KEY
+        sync: false
+      - key: SMTP_HOST
+        sync: false
+      - key: SMTP_PORT
+        sync: false
+      - key: SMTP_USER
+        sync: false
+      - key: SMTP_PASSWORD
+        sync: false
+      - key: SMTP_FROM
+        sync: false
+      - key: SEND_HOUR_START
+        value: "9"
+      - key: SEND_HOUR_END
+        value: "17"
+      - key: SEND_WEEKDAYS_ONLY
+        value: "true"
+
+  # ── Next.js frontend ─────────────────────────────────────────
+  - type: web
+    name: leadflow-frontend
+    runtime: node
+    rootDir: frontend
+    buildCommand: npm install && npm run build
+    startCommand: npm start
+    envVars:
+      - key: NEXT_PUBLIC_API_URL
+        sync: false
