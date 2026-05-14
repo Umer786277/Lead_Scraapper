@@ -1,6 +1,6 @@
 import { createClient } from "./supabase";
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+const API_BASE = ""; // proxied via next.config.ts rewrites → no CORS
 
 async function authHeaders(): Promise<Record<string, string>> {
   const supabase = createClient();
