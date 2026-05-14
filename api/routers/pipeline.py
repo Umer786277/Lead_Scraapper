@@ -33,10 +33,13 @@ class PipelineRunRequest(BaseModel):
 
 def _run_sync(searches, max_leads, headless, enrich_emails, user_id, run_id):
     """Executed in thread pool — calls the synchronous pipeline."""
+    import logging
+    log = logging.getLogger("pipeline")
+
     from pipeline import run_pipeline  # local import avoids Playwright at startup
 
     def on_event(kind, message, **extra):
-        pass  # events are stored in DB; frontend polls /api/pipeline/runs
+        log.info(f"pipeline [{kind}] {message}")
 
     try:
         result = run_pipeline(
@@ -46,14 +49,22 @@ def _run_sync(searches, max_leads, headless, enrich_emails, user_id, run_id):
             enrich_emails=enrich_emails,
             on_event=on_event,
         )
+        log.info(f"pipeline run_id={run_id} finished: {result}")
         # Tag all leads from this run with the user_id
-        with db.get_conn() as c:
-            c.execute(
-                "UPDATE leads SET user_id=%s WHERE run_id=%s AND user_id IS NULL",
-                (user_id, result["run_id"]),
-            )
-    except Exception:
-        pass  # pipeline.run_pipeline already calls db.finish_run with status=failed
+        try:
+            with db.get_conn() as c:
+                c.execute(
+                    "UPDATE leads SET user_id=%s WHERE run_id=%s AND user_id IS NULL",
+                    (user_id, result.get("run_id", run_id)),
+                )
+        except Exception as e:
+            log.warning(f"pipeline: could not tag leads with user_id: {e}")
+    except Exception as e:
+        log.error(f"pipeline run_id={run_id} FAILED: {e}", exc_info=True)
+        try:
+            db.finish_run(run_id, output_count=0, status="failed")
+        except Exception:
+            pass
 
 
 @router.post("/run")
