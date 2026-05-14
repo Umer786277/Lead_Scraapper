@@ -208,6 +208,14 @@ CREATE TABLE IF NOT EXISTS deals (
     closed_at     TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS worker_heartbeat (
+    id         INTEGER PRIMARY KEY DEFAULT 1,
+    pid        INTEGER,
+    started_at TEXT,
+    updated_at TEXT,
+    jobs       TEXT DEFAULT '{}'
+);
+
 CREATE INDEX IF NOT EXISTS idx_emails_domain      ON emails(domain);
 CREATE INDEX IF NOT EXISTS idx_leads_source       ON leads(source);
 CREATE INDEX IF NOT EXISTS idx_leads_status       ON leads(status);
@@ -588,6 +596,35 @@ def send_queue_summary():
             "SELECT status, COUNT(*) AS n FROM scheduled_sends GROUP BY status"
         ).fetchall()
         return {r["status"]: r["n"] for r in rows}
+
+
+def worker_heartbeat_write(pid: int, started_at: str, jobs: dict):
+    """Upsert worker state into DB so the API can read it cross-container."""
+    with get_conn() as c:
+        c.execute(
+            """INSERT INTO worker_heartbeat (id, pid, started_at, updated_at, jobs)
+               VALUES (1, %s, %s, %s, %s)
+               ON CONFLICT (id) DO UPDATE
+               SET pid=%s, started_at=%s, updated_at=%s, jobs=%s""",
+            (pid, started_at, now(), json.dumps(jobs),
+             pid, started_at, now(), json.dumps(jobs)),
+        )
+
+
+def worker_heartbeat_read() -> dict:
+    """Read worker state from DB. Returns {} if no heartbeat recorded yet."""
+    try:
+        with get_conn() as c:
+            row = c.execute(
+                "SELECT pid, started_at, updated_at, jobs FROM worker_heartbeat WHERE id=1"
+            ).fetchone()
+            if not row:
+                return {}
+            result = dict(row)
+            result["jobs"] = json.loads(result.get("jobs") or "{}")
+            return result
+    except Exception:
+        return {}
 
 
 # ── Events ───────────────────────────────────────────────────

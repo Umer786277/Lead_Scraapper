@@ -66,7 +66,15 @@ def _write_state(state: dict):
     try:
         STATE_FILE.write_text(json.dumps(state, indent=2), encoding="utf-8")
     except Exception as e:
-        log.warning(f"Could not write state: {e}")
+        log.warning(f"Could not write state file: {e}")
+    try:
+        db.worker_heartbeat_write(
+            pid=state.get("pid", os.getpid()),
+            started_at=state.get("started_at", _now_str()),
+            jobs=state.get("jobs", {}),
+        )
+    except Exception as e:
+        log.warning(f"Could not write heartbeat to DB: {e}")
 
 
 def _read_state() -> dict:

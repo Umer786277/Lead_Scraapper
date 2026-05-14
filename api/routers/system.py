@@ -18,8 +18,9 @@ STATE_FILE = Path(__file__).resolve().parent.parent.parent / "worker_state.json"
 @router.get("/status")
 def status(user_id: str = Depends(get_user_id)):
     """Return worker state + queue depth + env config checklist."""
-    worker_state = {}
-    if STATE_FILE.exists():
+    # Read from DB first (works cross-container on Render), fall back to local file
+    worker_state = db.worker_heartbeat_read()
+    if not worker_state and STATE_FILE.exists():
         try:
             worker_state = json.loads(STATE_FILE.read_text(encoding="utf-8"))
         except Exception:
