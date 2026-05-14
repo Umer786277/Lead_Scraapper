@@ -141,6 +141,7 @@ export default function LeadsPage() {
                 {bucket === "pending" && <th className="text-left px-4 py-3 text-slate-400 font-medium">Domain</th>}
                 <th className="text-left px-4 py-3 text-slate-400 font-medium">City</th>
                 <th className="text-left px-4 py-3 text-slate-400 font-medium">Reviews</th>
+                <th className="text-left px-4 py-3 text-slate-400 font-medium">Last Review</th>
                 <th className="text-left px-4 py-3 text-slate-400 font-medium">Maps</th>
                 <th className="text-left px-4 py-3 text-slate-400 font-medium">AI Note</th>
                 <th className="text-left px-4 py-3 text-slate-400 font-medium">Status</th>
@@ -189,6 +190,19 @@ export default function LeadsPage() {
                           ⭐ {lead.rating?.toFixed(1) ?? "?"} <span className="text-slate-500">({lead.reviews})</span>
                         </span>
                       ) : "—"}
+                    </td>
+
+                    <td className="px-4 py-3 text-xs">
+                      {lead.last_review_days != null ? (
+                        <span className={`font-medium ${
+                          lead.last_review_days <= 7   ? "text-green-400" :
+                          lead.last_review_days <= 30  ? "text-yellow-400" :
+                          lead.last_review_days <= 90  ? "text-orange-400" :
+                                                         "text-red-400"
+                        }`}>
+                          {lead.last_review_days === 0 ? "Today" : `${lead.last_review_days}d ago`}
+                        </span>
+                      ) : <span className="text-slate-600">—</span>}
                     </td>
 
                     <td className="px-4 py-3">

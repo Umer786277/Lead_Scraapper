@@ -107,6 +107,7 @@ CREATE TABLE IF NOT EXISTS leads (
     contact_name      TEXT,
     maps_url          TEXT,
     improvement_note  TEXT,
+    last_review_days  INTEGER,
     created_at        TEXT
 );
 

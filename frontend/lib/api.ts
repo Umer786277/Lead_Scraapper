@@ -52,6 +52,7 @@ export interface Lead {
   reviews: number | null;
   maps_url: string | null;
   improvement_note: string | null;
+  last_review_days: number | null;
   status: string;
   created_at: string;
 }

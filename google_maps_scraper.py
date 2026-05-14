@@ -106,6 +106,21 @@ def extract_phone(text):
     return ""
 
 
+def _parse_days_ago(text: str):
+    """Convert Google Maps relative date text to approximate integer days."""
+    if not text:
+        return None
+    t = text.lower().strip()
+    m = re.search(r'(\d+)', t)
+    num = int(m.group(1)) if m else 1   # "a week ago" has no digit → 1 unit
+    if "year"  in t: return num * 365
+    if "month" in t: return num * 30
+    if "week"  in t: return num * 7
+    if "day"   in t: return num
+    if "hour"  in t or "minute" in t or "just now" in t: return 0
+    return None
+
+
 def scrape_place_details(page, url):
     """Open a single business listing and extract all details."""
     details = {
@@ -116,6 +131,7 @@ def scrape_place_details(page, url):
         "reviews": "",
         "status": "",
         "maps_url": url,
+        "last_review_days": None,
     }
 
     try:
@@ -172,6 +188,14 @@ def scrape_place_details(page, url):
             web_el = page.query_selector('a[data-item-id="authority"]')
             if web_el:
                 details["website"] = clean_website_url(web_el.get_attribute("href") or "")
+        except:
+            pass
+
+        # Most recent review date
+        try:
+            date_els = page.query_selector_all('span.rsqaWe, span.dehysf')
+            if date_els:
+                details["last_review_days"] = _parse_days_ago(date_els[0].inner_text())
         except:
             pass
 
