@@ -31,6 +31,36 @@ services:
       - key: SEND_WEEKDAYS_ONLY
         value: "true"
 
+  # ── Background worker ────────────────────────────────────────
+  - type: worker
+    name: leadflow-worker
+    runtime: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: python worker.py
+    envVars:
+      - key: DATABASE_URL
+        sync: false
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: TAVILY_API_KEY
+        sync: false
+      - key: SMTP_HOST
+        sync: false
+      - key: SMTP_PORT
+        sync: false
+      - key: SMTP_USER
+        sync: false
+      - key: SMTP_PASSWORD
+        sync: false
+      - key: SMTP_FROM
+        sync: false
+      - key: SEND_HOUR_START
+        value: "9"
+      - key: SEND_HOUR_END
+        value: "17"
+      - key: SEND_WEEKDAYS_ONLY
+        value: "true"
+
   # ── Next.js frontend ─────────────────────────────────────────
   - type: web
     name: leadflow-frontend
