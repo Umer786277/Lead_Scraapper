@@ -35,12 +35,13 @@ _extra = [o.strip() for o in os.getenv("CORS_ORIGINS", "").split(",") if o.strip
 _origins = list({
     "http://localhost:3000",
     "http://127.0.0.1:3000",
-    "http://192.168.100.164:3000",   # LAN dev access
+    "http://192.168.100.164:3000",
     *_extra,
 })
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_origins,
+    allow_origin_regex=r"https://.*\.onrender\.com",  # all Render preview URLs
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
