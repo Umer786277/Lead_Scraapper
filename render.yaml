@@ -1,5 +1,7 @@
 services:
-  # ── FastAPI backend ──────────────────────────────────────────
+  # ── FastAPI backend (includes background worker) ──────────────
+  # Worker jobs run inside this process via APScheduler BackgroundScheduler.
+  # Keep UptimeRobot pinging / every 5 min so free-tier service never sleeps.
   - type: web
     name: leadflow-api
     runtime: python
@@ -24,35 +26,11 @@ services:
         sync: false
       - key: SMTP_FROM
         sync: false
-      - key: SEND_HOUR_START
-        value: "9"
-      - key: SEND_HOUR_END
-        value: "17"
-      - key: SEND_WEEKDAYS_ONLY
-        value: "true"
-
-  # ── Background worker ────────────────────────────────────────
-  - type: worker
-    name: leadflow-worker
-    runtime: python
-    buildCommand: pip install -r requirements.txt
-    startCommand: python worker.py
-    envVars:
-      - key: DATABASE_URL
+      - key: IMAP_HOST
         sync: false
-      - key: OPENAI_API_KEY
+      - key: IMAP_USER
         sync: false
-      - key: TAVILY_API_KEY
-        sync: false
-      - key: SMTP_HOST
-        sync: false
-      - key: SMTP_PORT
-        sync: false
-      - key: SMTP_USER
-        sync: false
-      - key: SMTP_PASSWORD
-        sync: false
-      - key: SMTP_FROM
+      - key: IMAP_PASSWORD
         sync: false
       - key: SEND_HOUR_START
         value: "9"
@@ -61,7 +39,7 @@ services:
       - key: SEND_WEEKDAYS_ONLY
         value: "true"
 
-  # ── Next.js frontend ─────────────────────────────────────────
+  # ── Next.js frontend ──────────────────────────────────────────
   - type: web
     name: leadflow-frontend
     runtime: node

@@ -59,8 +59,17 @@ app.include_router(system.router,    prefix="/api/system",    tags=["system"])
 @app.on_event("startup")
 def startup():
     db.init_db()
+    import threading
+    from api import worker_runner
+    threading.Thread(target=worker_runner.start, daemon=True).start()
 
 
-@app.get("/", tags=["health"])
+@app.on_event("shutdown")
+def shutdown():
+    from api import worker_runner
+    worker_runner.stop()
+
+
+@app.api_route("/", methods=["GET", "HEAD"], tags=["health"])
 def health():
     return {"status": "ok", "version": "1.0.0"}

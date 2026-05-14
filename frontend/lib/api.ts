@@ -143,5 +143,7 @@ export const api = {
 
   system: {
     status: () => apiFetch("/api/system/status"),
+    logs: (lastN = 150) => apiFetch<{ lines: string[] }>(`/api/system/logs?last_n=${lastN}`),
+    triggerJob: (jobId: string) => apiFetch<{ ok: boolean; job_id: string }>(`/api/system/jobs/${jobId}/trigger`, { method: "POST" }),
   },
 };
