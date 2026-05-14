@@ -4,22 +4,32 @@ FastAPI entry point.
 Run locally:
     uvicorn api.main:app --reload --port 8000
 
-Production (Railway):
+Production (Render):
     uvicorn api.main:app --host 0.0.0.0 --port $PORT
 """
 
+import logging
 import os
+import subprocess
 import sys
 from pathlib import Path
 
 # Make the project root importable (db.py, pipeline.py, etc. live there)
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+# ── Playwright browser path ───────────────────────────────────
+# Store browsers inside the project directory so they persist on Render.
+# Must be set before any Playwright import.
+_PLAYWRIGHT_DIR = Path(__file__).resolve().parent.parent / ".playwright"
+os.environ.setdefault("PLAYWRIGHT_BROWSERS_PATH", str(_PLAYWRIGHT_DIR))
+
 import db
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from api.routers import analytics, leads, outreach, pipeline, system
+
+log = logging.getLogger("startup")
 
 app = FastAPI(
     title="Lead Scraper API",
@@ -29,8 +39,6 @@ app = FastAPI(
 )
 
 # ── CORS ─────────────────────────────────────────────────────
-# Allow the Next.js dev server (both localhost and LAN IP) plus production URL.
-# Set CORS_ORIGINS=https://your-app.vercel.app in production to restrict this.
 _extra = [o.strip() for o in os.getenv("CORS_ORIGINS", "").split(",") if o.strip()]
 _origins = list({
     "http://localhost:3000",
@@ -41,7 +49,7 @@ _origins = list({
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_origins,
-    allow_origin_regex=r"https://.*\.onrender\.com",  # all Render preview URLs
+    allow_origin_regex=r"https://.*\.onrender\.com",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -55,9 +63,29 @@ app.include_router(outreach.router,  prefix="/api/outreach",  tags=["outreach"])
 app.include_router(system.router,    prefix="/api/system",    tags=["system"])
 
 
+def _ensure_playwright():
+    """Install Chromium browser binary if not present. Runs once at startup."""
+    browsers_dir = Path(os.environ["PLAYWRIGHT_BROWSERS_PATH"])
+    existing = list(browsers_dir.glob("chromium*/chrome-linux64/chrome")) + \
+               list(browsers_dir.glob("chromium*/chrome-headless-shell-linux64/chrome-headless-shell"))
+    if existing:
+        log.info(f"Playwright Chromium found at {existing[0]}")
+        return
+    log.info(f"Playwright Chromium not found in {browsers_dir} — installing now...")
+    result = subprocess.run(
+        [sys.executable, "-m", "playwright", "install", "chromium"],
+        capture_output=True, text=True,
+    )
+    if result.returncode == 0:
+        log.info("Playwright Chromium installed successfully")
+    else:
+        log.error(f"Playwright install failed:\n{result.stderr[:500]}")
+
+
 # ── Bootstrap ─────────────────────────────────────────────────
 @app.on_event("startup")
 def startup():
+    _ensure_playwright()
     db.init_db()
     import threading
     from api import worker_runner
