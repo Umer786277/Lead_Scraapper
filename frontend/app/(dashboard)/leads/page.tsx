@@ -140,7 +140,9 @@ export default function LeadsPage() {
                 {bucket === "email"   && <th className="text-left px-4 py-3 text-slate-400 font-medium">Email</th>}
                 {bucket === "pending" && <th className="text-left px-4 py-3 text-slate-400 font-medium">Domain</th>}
                 <th className="text-left px-4 py-3 text-slate-400 font-medium">City</th>
-                <th className="text-left px-4 py-3 text-slate-400 font-medium">Country</th>
+                <th className="text-left px-4 py-3 text-slate-400 font-medium">Reviews</th>
+                <th className="text-left px-4 py-3 text-slate-400 font-medium">Maps</th>
+                <th className="text-left px-4 py-3 text-slate-400 font-medium">AI Note</th>
                 <th className="text-left px-4 py-3 text-slate-400 font-medium">Status</th>
                 <th className="text-left px-4 py-3 text-slate-400 font-medium">Actions</th>
               </tr>
@@ -180,7 +182,31 @@ export default function LeadsPage() {
                     )}
 
                     <td className="px-4 py-3 text-slate-400">{lead.city || "—"}</td>
-                    <td className="px-4 py-3 text-slate-400">{lead.country || "—"}</td>
+
+                    <td className="px-4 py-3 text-slate-400 text-xs">
+                      {lead.reviews != null ? (
+                        <span className="flex items-center gap-1">
+                          ⭐ {lead.rating?.toFixed(1) ?? "?"} <span className="text-slate-500">({lead.reviews})</span>
+                        </span>
+                      ) : "—"}
+                    </td>
+
+                    <td className="px-4 py-3">
+                      {lead.maps_url ? (
+                        <a href={lead.maps_url} target="_blank" rel="noopener noreferrer"
+                          className="text-xs text-indigo-400 hover:text-indigo-300 underline">
+                          View
+                        </a>
+                      ) : <span className="text-slate-600">—</span>}
+                    </td>
+
+                    <td className="px-4 py-3 max-w-[220px]">
+                      {lead.improvement_note ? (
+                        <span className="text-xs text-yellow-300/80 leading-relaxed" title={lead.improvement_note}>
+                          {lead.improvement_note.slice(0, 80)}{lead.improvement_note.length > 80 ? "…" : ""}
+                        </span>
+                      ) : <span className="text-slate-600 text-xs">—</span>}
+                    </td>
 
                     <td className="px-4 py-3">
                       <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${STATUS_COLORS[lead.status] ?? "bg-slate-700 text-slate-300"}`}>

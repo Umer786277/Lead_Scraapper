@@ -184,6 +184,7 @@ def run_pipeline(searches, max_leads=20, headless=True, enrich_emails=True, on_e
                         country=country,
                         rating=_to_float(details.get("rating")),
                         reviews=_to_int(details.get("reviews")),
+                        maps_url=url or None,
                         status="new",
                     )
                     leads_created.append({

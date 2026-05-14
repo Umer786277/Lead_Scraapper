@@ -105,6 +105,8 @@ CREATE TABLE IF NOT EXISTS leads (
     homepage_snippet  TEXT,
     opener            TEXT,
     contact_name      TEXT,
+    maps_url          TEXT,
+    improvement_note  TEXT,
     created_at        TEXT
 );
 

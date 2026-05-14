@@ -203,6 +203,39 @@ def _enroll_lead(lead_id: int, campaign_id: int, steps: list) -> bool:
     return True
 
 
+# ── AI improvement note ──────────────────────────────────────
+def _generate_improvement_note(domain: str, snippet: str) -> str | None:
+    """Generate a 1-2 sentence note about business problems we could help with."""
+    api_key = os.getenv("OPENAI_API_KEY", "")
+    if not api_key or not snippet:
+        return None
+    try:
+        import requests
+        prompt = (
+            f"Business website: {domain}\n"
+            f"Homepage text: {snippet[:600]}\n\n"
+            "In 1-2 sentences, identify the biggest improvement opportunity for this business "
+            "(e.g. weak online presence, no reviews strategy, poor lead capture, slow follow-up, "
+            "missing contact info). Be specific and actionable. Reply with just the note, no preamble."
+        )
+        resp = requests.post(
+            "https://api.openai.com/v1/chat/completions",
+            headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+            json={
+                "model": "gpt-4o-mini",
+                "messages": [{"role": "user", "content": prompt}],
+                "max_tokens": 120,
+                "temperature": 0.4,
+            },
+            timeout=15,
+        )
+        resp.raise_for_status()
+        return resp.json()["choices"][0]["message"]["content"].strip()[:500]
+    except Exception as e:
+        log.debug(f"AI note failed for {domain}: {e}")
+        return None
+
+
 # ── Jobs ─────────────────────────────────────────────────────
 def job_enrich(state: dict, campaign_id: int | None, steps: list):
     """Find leads with domains but no email, extract, then enroll in auto campaign."""
@@ -322,6 +355,8 @@ def job_enrich(state: dict, campaign_id: int | None, steps: list):
                         best_email = e
 
                 snippet = extraction.get("snippet")
+                improvement_note = _generate_improvement_note(domain, snippet) if snippet else None
+
                 if best_email or snippet:
                     with db.get_conn() as c:
                         for lid in lead_ids:
@@ -336,6 +371,12 @@ def job_enrich(state: dict, campaign_id: int | None, steps: list):
                                     "UPDATE leads SET homepage_snippet=%s "
                                     "WHERE id=%s AND (homepage_snippet IS NULL OR homepage_snippet='')",
                                     (snippet, lid),
+                                )
+                            if improvement_note:
+                                c.execute(
+                                    "UPDATE leads SET improvement_note=%s "
+                                    "WHERE id=%s AND (improvement_note IS NULL OR improvement_note='')",
+                                    (improvement_note, lid),
                                 )
                 if best_email:
                     result["enriched"] += 1

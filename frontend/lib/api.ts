@@ -50,6 +50,8 @@ export interface Lead {
   country: string | null;
   rating: number | null;
   reviews: number | null;
+  maps_url: string | null;
+  improvement_note: string | null;
   status: string;
   created_at: string;
 }
