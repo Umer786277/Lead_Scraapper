@@ -543,6 +543,47 @@ def job_scrape_rotation(state: dict):
     _write_state(state)
 
 
+def job_calls(state: dict):
+    """Dispatch queued outbound calls via Vapi.ai."""
+    log.info("calls: checking queue")
+    result = {"at": _now_str(), "dispatched": 0, "failed": 0, "error": None}
+
+    vapi_key = os.getenv("VAPI_API_KEY", "")
+    if not vapi_key:
+        result["error"] = "VAPI_API_KEY not set — skipping"
+        state["jobs"]["calls"] = result
+        _write_state(state)
+        return
+
+    try:
+        from voice_caller import dispatch_call
+        queued = db.get_queued_calls(limit=5)
+
+        for call_row in queued:
+            try:
+                vapi_call = dispatch_call(call_row)
+                db.update_call(
+                    call_row["id"],
+                    status="initiated",
+                    vapi_call_id=vapi_call.get("id", ""),
+                    initiated_at=db.now(),
+                )
+                result["dispatched"] += 1
+                log.info(f"calls: dispatched {vapi_call.get('id')} for lead {call_row['lead_id']}")
+            except Exception as e:
+                db.update_call(call_row["id"], status="failed", notes=str(e)[:200])
+                result["failed"] += 1
+                log.warning(f"calls: failed lead {call_row['lead_id']}: {e}")
+
+    except Exception as e:
+        log.error(f"calls job crashed: {e}", exc_info=True)
+        result["error"] = str(e)[:300]
+
+    state["jobs"]["calls"] = result
+    _write_state(state)
+    log.info(f"calls: done {result}")
+
+
 # ── Entry point ──────────────────────────────────────────────
 def main():
     log.info("Worker starting…")

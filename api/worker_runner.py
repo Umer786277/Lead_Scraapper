@@ -78,7 +78,7 @@ def start():
         db.init_db()
 
         from worker import (
-            job_enrich, job_send, job_inbox, job_scrape_rotation,
+            job_enrich, job_send, job_inbox, job_scrape_rotation, job_calls,
             _now_str, _write_state, _ensure_auto_campaign,
         )
 
@@ -93,6 +93,7 @@ def start():
                 "send":     {},
                 "inbox":    {},
                 "rotation": {},
+                "calls":    {},
             },
         })
         _write_state(_state)
@@ -121,6 +122,11 @@ def start():
             lambda: job_scrape_rotation(_state),
             "interval", hours=1, id="rotation", max_instances=1,
             next_run_time=now_utc + timedelta(minutes=5),
+        )
+        _scheduler.add_job(
+            lambda: job_calls(_state),
+            "interval", minutes=1, id="calls", max_instances=1,
+            next_run_time=now_utc + timedelta(seconds=45),
         )
 
         _scheduler.start()

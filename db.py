@@ -219,6 +219,27 @@ CREATE TABLE IF NOT EXISTS worker_heartbeat (
     jobs       TEXT DEFAULT '{}'
 );
 
+CREATE TABLE IF NOT EXISTS calls (
+    id              SERIAL PRIMARY KEY,
+    lead_id         INTEGER NOT NULL REFERENCES leads(id),
+    vapi_call_id    TEXT UNIQUE,
+    status          TEXT NOT NULL DEFAULT 'queued',
+    duration_sec    INTEGER,
+    transcript      TEXT,
+    summary         TEXT,
+    recording_url   TEXT,
+    qualified       TEXT,
+    notes           TEXT,
+    ended_reason    TEXT,
+    scheduled_at    TEXT NOT NULL,
+    initiated_at    TEXT,
+    ended_at        TEXT,
+    created_at      TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_calls_lead         ON calls(lead_id);
+CREATE INDEX IF NOT EXISTS idx_calls_status       ON calls(status);
+CREATE INDEX IF NOT EXISTS idx_calls_vapi         ON calls(vapi_call_id);
 CREATE INDEX IF NOT EXISTS idx_emails_domain      ON emails(domain);
 CREATE INDEX IF NOT EXISTS idx_leads_source       ON leads(source);
 CREATE INDEX IF NOT EXISTS idx_leads_status       ON leads(status);
@@ -597,6 +618,73 @@ def send_queue_summary():
     with get_conn() as c:
         rows = c.execute(
             "SELECT status, COUNT(*) AS n FROM scheduled_sends GROUP BY status"
+        ).fetchall()
+        return {r["status"]: r["n"] for r in rows}
+
+
+# ── Calls ────────────────────────────────────────────────────
+def queue_call(lead_id: int) -> int:
+    with get_conn() as c:
+        cur = c.execute(
+            "INSERT INTO calls (lead_id, status, scheduled_at, created_at) "
+            "VALUES (%s, 'queued', %s, %s) RETURNING id",
+            (lead_id, now(), now()),
+        )
+        return cur.fetchone()["id"]
+
+
+def get_queued_calls(limit: int = 5) -> list:
+    with get_conn() as c:
+        rows = c.execute(
+            """SELECT c.id, c.lead_id, c.scheduled_at,
+                      l.business_name, l.phone, l.city, l.country, l.website
+               FROM calls c JOIN leads l ON l.id = c.lead_id
+               WHERE c.status = 'queued' AND c.scheduled_at <= %s
+               ORDER BY c.scheduled_at ASC LIMIT %s""",
+            (now(), limit),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+
+def update_call(call_id: int, **fields):
+    if not fields:
+        return
+    cols = ", ".join(f"{k}=%s" for k in fields)
+    with get_conn() as c:
+        c.execute(f"UPDATE calls SET {cols} WHERE id=%s", (*fields.values(), call_id))
+
+
+def update_call_by_vapi_id(vapi_call_id: str, **fields):
+    if not fields:
+        return
+    cols = ", ".join(f"{k}=%s" for k in fields)
+    with get_conn() as c:
+        c.execute(f"UPDATE calls SET {cols} WHERE vapi_call_id=%s", (*fields.values(), vapi_call_id))
+
+
+def get_call_lead_id(vapi_call_id: str):
+    with get_conn() as c:
+        row = c.execute(
+            "SELECT lead_id FROM calls WHERE vapi_call_id=%s", (vapi_call_id,)
+        ).fetchone()
+        return row["lead_id"] if row else None
+
+
+def list_calls(limit: int = 100, offset: int = 0) -> list:
+    with get_conn() as c:
+        rows = c.execute(
+            """SELECT c.*, l.business_name, l.phone, l.city, l.country, l.rating, l.reviews
+               FROM calls c JOIN leads l ON l.id = c.lead_id
+               ORDER BY c.id DESC LIMIT %s OFFSET %s""",
+            (limit, offset),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+
+def calls_summary() -> dict:
+    with get_conn() as c:
+        rows = c.execute(
+            "SELECT status, COUNT(*) AS n FROM calls GROUP BY status"
         ).fetchall()
         return {r["status"]: r["n"] for r in rows}
 

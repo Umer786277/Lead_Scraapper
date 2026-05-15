@@ -27,7 +27,7 @@ import db
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from api.routers import analytics, leads, outreach, pipeline, system
+from api.routers import analytics, calls, leads, outreach, pipeline, system
 
 log = logging.getLogger("startup")
 
@@ -61,6 +61,7 @@ app.include_router(analytics.router, prefix="/api/analytics", tags=["analytics"]
 app.include_router(pipeline.router,  prefix="/api/pipeline",  tags=["pipeline"])
 app.include_router(outreach.router,  prefix="/api/outreach",  tags=["outreach"])
 app.include_router(system.router,    prefix="/api/system",    tags=["system"])
+app.include_router(calls.router,     prefix="/api/calls",     tags=["calls"])
 
 
 def _ensure_playwright():
