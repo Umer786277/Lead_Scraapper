@@ -474,6 +474,13 @@ def job_enrich(state: dict, campaign_id: int | None, steps: list):
 
 def job_send(state: dict):
     """Process due scheduled sends."""
+    # Yield to active scraping — no DB/SMTP load while browser is running.
+    _acquired = _browser_lock.acquire(blocking=False)
+    if not _acquired:
+        log.debug("send: scraping active — skipping tick")
+        return
+    _browser_lock.release()
+
     log.info("send: processing queue")
     result = {"at": _now_str(), "sent": 0, "failed": 0, "skipped": 0,
               "deferred": 0, "error": None}
@@ -614,6 +621,13 @@ def job_scrape_rotation(state: dict):
 
 def job_calls(state: dict):
     """Dispatch queued outbound calls via Vapi.ai."""
+    # Yield to active scraping — no DB load while browser is running.
+    _acquired = _browser_lock.acquire(blocking=False)
+    if not _acquired:
+        log.debug("calls: scraping active — skipping tick")
+        return
+    _browser_lock.release()
+
     log.info("calls: checking queue")
     result = {"at": _now_str(), "dispatched": 0, "failed": 0, "error": None}
 

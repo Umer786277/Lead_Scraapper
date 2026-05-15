@@ -110,7 +110,7 @@ def start():
         )
         _scheduler.add_job(
             lambda: job_send(_state),
-            "interval", minutes=2, id="send", max_instances=1,
+            "interval", minutes=5, id="send", max_instances=1,
             next_run_time=now_utc + timedelta(seconds=30),
         )
         _scheduler.add_job(
@@ -125,7 +125,7 @@ def start():
         )
         _scheduler.add_job(
             lambda: job_calls(_state),
-            "interval", minutes=1, id="calls", max_instances=1,
+            "interval", minutes=5, id="calls", max_instances=1,
             next_run_time=now_utc + timedelta(seconds=45),
         )
 
