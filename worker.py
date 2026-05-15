@@ -413,6 +413,34 @@ def job_enrich(state: dict, campaign_id: int | None, steps: list):
         log.error(f"enrich job crashed: {e}", exc_info=True)
         result["error"] = str(e)[:300]
 
+    # Phase 2: backfill AI notes for leads that already have a snippet
+    # but never got an improvement_note (no browser needed here).
+    try:
+        with db.get_conn() as c:
+            note_rows = c.execute(
+                """
+                SELECT id, domain, homepage_snippet
+                FROM leads
+                WHERE improvement_note IS NULL
+                  AND homepage_snippet IS NOT NULL AND homepage_snippet != ''
+                LIMIT 20
+                """,
+            ).fetchall()
+        note_count = 0
+        for nr in note_rows:
+            note = _generate_improvement_note(nr["domain"] or "", nr["homepage_snippet"])
+            if note:
+                with db.get_conn() as c:
+                    c.execute(
+                        "UPDATE leads SET improvement_note=%s WHERE id=%s",
+                        (note, nr["id"]),
+                    )
+                note_count += 1
+        if note_count:
+            log.info(f"enrich: backfilled {note_count} AI notes from existing snippets")
+    except Exception as e:
+        log.warning(f"enrich: AI note backfill failed — {e}")
+
     state["jobs"]["enrich"] = result
     _write_state(state)
     log.info(f"enrich: done {result}")
