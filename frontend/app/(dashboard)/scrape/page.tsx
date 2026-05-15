@@ -9,6 +9,29 @@ interface Schedule {
   target_leads: number; status: string; created_at: string;
 }
 
+const COUNTRY_CITIES: Record<string, string[]> = {
+  UK: [
+    "London", "Manchester", "Birmingham", "Leeds", "Glasgow", "Sheffield",
+    "Edinburgh", "Liverpool", "Bristol", "Cardiff", "Leicester", "Coventry",
+    "Nottingham", "Newcastle upon Tyne", "Brighton", "Southampton",
+    "Oxford", "Cambridge", "Aberdeen", "Belfast",
+  ],
+  USA: [
+    "New York", "Los Angeles", "Chicago", "Houston", "Phoenix", "Philadelphia",
+    "San Antonio", "San Diego", "Dallas", "San Jose", "Austin", "Jacksonville",
+    "Fort Worth", "Columbus", "Charlotte", "Indianapolis", "San Francisco",
+    "Seattle", "Denver", "Nashville", "Las Vegas", "Portland", "Miami", "Atlanta",
+  ],
+  Australia: [
+    "Sydney", "Melbourne", "Brisbane", "Perth", "Adelaide", "Gold Coast",
+    "Canberra", "Newcastle", "Wollongong", "Sunshine Coast", "Geelong",
+    "Townsville", "Hobart", "Cairns", "Darwin", "Ballarat", "Bendigo",
+    "Albury", "Launceston", "Mackay",
+  ],
+};
+
+const COUNTRIES = Object.keys(COUNTRY_CITIES);
+
 const DEFAULT_ROWS: SearchRow[] = [{ niche: "pet clinics", city: "London", country: "UK" }];
 
 export default function ScrapePage() {
@@ -37,9 +60,18 @@ export default function ScrapePage() {
   }
 
   function updateRow(i: number, field: keyof SearchRow, val: string) {
-    setRows((prev) => prev.map((r, idx) => idx === i ? { ...r, [field]: val } : r));
+    setRows((prev) => prev.map((r, idx) => {
+      if (idx !== i) return r;
+      if (field === "country") {
+        // Reset city to first city of the new country
+        return { ...r, country: val, city: COUNTRY_CITIES[val]?.[0] ?? "" };
+      }
+      return { ...r, [field]: val };
+    }));
   }
-  function addRow() { setRows((prev) => [...prev, { niche: "", city: "", country: "" }]); }
+  function addRow() {
+    setRows((prev) => [...prev, { niche: "", city: COUNTRY_CITIES["UK"][0], country: "UK" }]);
+  }
   function removeRow(i: number) { setRows((prev) => prev.filter((_, idx) => idx !== i)); }
 
   const validRows = rows.filter((r) => r.niche.trim() && r.city.trim() && r.country.trim());
@@ -117,18 +149,26 @@ export default function ScrapePage() {
                 onChange={(e) => updateRow(i, "niche", e.target.value)}
                 className="bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/40"
               />
-              <input
-                placeholder="City"
-                value={row.city}
-                onChange={(e) => updateRow(i, "city", e.target.value)}
-                className="bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/40"
-              />
-              <input
-                placeholder="Country"
+              {/* Country dropdown */}
+              <select
                 value={row.country}
                 onChange={(e) => updateRow(i, "country", e.target.value)}
-                className="bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/40"
-              />
+                className="bg-[#1a1d2e] border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-indigo-500/40"
+              >
+                {COUNTRIES.map((c) => (
+                  <option key={c} value={c}>{c}</option>
+                ))}
+              </select>
+              {/* City dropdown — options depend on selected country */}
+              <select
+                value={row.city}
+                onChange={(e) => updateRow(i, "city", e.target.value)}
+                className="bg-[#1a1d2e] border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-indigo-500/40"
+              >
+                {(COUNTRY_CITIES[row.country] ?? []).map((city) => (
+                  <option key={city} value={city}>{city}</option>
+                ))}
+              </select>
               <button
                 onClick={() => removeRow(i)}
                 disabled={rows.length === 1}
