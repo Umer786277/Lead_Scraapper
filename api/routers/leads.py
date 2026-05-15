@@ -79,7 +79,9 @@ def list_leads(
         rows = c.execute(
             f"""
             SELECT id, source, business_name, domain, email, phone, website,
-                   address, city, country, rating, reviews, status, created_at
+                   address, city, country, rating, reviews,
+                   maps_url, improvement_note, last_review_days,
+                   status, created_at
             FROM leads
             {base_where} {filter_clause} {status_clause} {search_clause}
             ORDER BY id DESC
