@@ -258,6 +258,10 @@ _MIGRATIONS = [
     "ALTER TABLE leads ADD COLUMN IF NOT EXISTS improvement_note TEXT",
     "ALTER TABLE leads ADD COLUMN IF NOT EXISTS last_review_days INTEGER",
     "ALTER TABLE leads ADD COLUMN IF NOT EXISTS reviews INTEGER",
+    # Performance indexes — safe to re-run (IF NOT EXISTS)
+    "CREATE INDEX IF NOT EXISTS idx_leads_domain   ON leads(domain)     WHERE domain   IS NOT NULL",
+    "CREATE INDEX IF NOT EXISTS idx_domains_domain ON domains(domain)",
+    "CREATE INDEX IF NOT EXISTS idx_leads_maps_url ON leads(maps_url)   WHERE maps_url IS NOT NULL",
 ]
 
 
@@ -367,10 +371,19 @@ def insert_email(domain_id, domain, email, source_url, source_type, confidence,
 
 # ── Leads ────────────────────────────────────────────────────
 def insert_lead(**kwargs):
+    """Insert a lead and return its id. Deduplicates by maps_url if provided."""
     kwargs.setdefault("created_at", now())
+    maps_url = kwargs.get("maps_url")
     cols = ", ".join(kwargs.keys())
     placeholders = ", ".join("%s" for _ in kwargs)
     with get_conn() as c:
+        # Dedup: if this Maps URL was already scraped, return the existing lead id.
+        if maps_url:
+            row = c.execute(
+                "SELECT id FROM leads WHERE maps_url=%s LIMIT 1", (maps_url,)
+            ).fetchone()
+            if row:
+                return row["id"]
         cur = c.execute(
             f"INSERT INTO leads ({cols}) VALUES ({placeholders}) RETURNING id",
             tuple(kwargs.values()),

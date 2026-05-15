@@ -128,6 +128,14 @@ def run_pipeline(searches, max_leads=20, headless=True, enrich_emails=True, on_e
                     "--disable-setuid-sandbox",
                     "--disable-dev-shm-usage",
                     "--disable-blink-features=AutomationControlled",
+                    "--disable-gpu",
+                    "--no-first-run",
+                    "--disable-extensions",
+                    "--disable-default-apps",
+                    "--disable-background-networking",
+                    "--disable-sync",
+                    "--mute-audio",
+                    "--disable-features=TranslateUI",
                 ],
             )
             context = browser.new_context(
@@ -135,7 +143,7 @@ def run_pipeline(searches, max_leads=20, headless=True, enrich_emails=True, on_e
                     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
                     "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
                 ),
-                viewport={"width": 1280, "height": 800},
+                viewport={"width": 1024, "height": 600},
                 locale="en-US",
             )
             context.add_init_script("""
@@ -241,26 +249,36 @@ def run_pipeline(searches, max_leads=20, headless=True, enrich_emails=True, on_e
                     )
 
                     best_email = None
-                    for e in result.get("emails", []):
-                        db.insert_email(
-                            domain_id=domain_id,
-                            domain=domain,
-                            email=e["email"],
-                            source_url=e.get("source_url"),
-                            source_type=e.get("source_type"),
-                            confidence=e.get("confidence"),
-                            is_role=e.get("is_role"),
-                            has_mx=result.get("has_mx"),
-                            category=e.get("category"),
-                        )
-                        emails_created += 1
-                        if best_email is None or _email_score(e) > _email_score(best_email):
-                            best_email = e
-
-                    # Attach best email + homepage snippet back to lead rows
                     snippet = result.get("snippet")
-                    if best_email or snippet:
-                        with db.get_conn() as c:
+                    has_mx = result.get("has_mx")
+
+                    # Batch: all email inserts + lead updates in one connection
+                    with db.get_conn() as c:
+                        for e in result.get("emails", []):
+                            try:
+                                c.execute(
+                                    "INSERT INTO emails "
+                                    "(domain_id, domain, email, source_url, source_type, confidence, "
+                                    " is_role, category, verification_status, extracted_at) "
+                                    "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) "
+                                    "ON CONFLICT (domain, email) DO NOTHING",
+                                    (
+                                        domain_id, domain, e["email"],
+                                        e.get("source_url"), e.get("source_type"),
+                                        e.get("confidence"), int(bool(e.get("is_role"))),
+                                        e.get("category"),
+                                        "valid_mx" if has_mx else "no_mx",
+                                        db.now(),
+                                    ),
+                                )
+                                emails_created += 1
+                            except Exception:
+                                pass
+                            if best_email is None or _email_score(e) > _email_score(best_email):
+                                best_email = e
+
+                        # Attach best email + homepage snippet back to lead rows
+                        if best_email or snippet:
                             for lid in lead_ids:
                                 if best_email:
                                     c.execute(

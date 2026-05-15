@@ -18,12 +18,33 @@ import logging
 import os
 import sys
 import threading
+import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 # Only one Playwright/Chromium instance at a time — Render free tier has ~512 MB RAM.
 # job_enrich skips its tick if the lock is held; job_scrape_rotation holds it during scraping.
 _browser_lock = threading.Lock()
+
+# Throttle DB heartbeat writes — lightweight jobs (send/calls) run every 1-2 min
+# but we only need to persist heartbeat to DB once every 2 min.
+_last_db_heartbeat: float = 0
+
+# Shared Chromium launch args — tuned to minimise RAM on Render's 512 MB free tier.
+_CHROMIUM_ARGS = [
+    "--no-sandbox",
+    "--disable-setuid-sandbox",
+    "--disable-dev-shm-usage",
+    "--disable-blink-features=AutomationControlled",
+    "--disable-gpu",
+    "--no-first-run",
+    "--disable-extensions",
+    "--disable-default-apps",
+    "--disable-background-networking",
+    "--disable-sync",
+    "--mute-audio",
+    "--disable-features=TranslateUI",
+]
 
 # Load .env BEFORE any module that calls os.getenv at import time —
 # otherwise SMTP / IMAP / OPENAI env vars come back empty on first job tick.
@@ -67,19 +88,25 @@ def _now_str():
     return datetime.now(timezone.utc).replace(tzinfo=None).isoformat(timespec="seconds")
 
 
-def _write_state(state: dict):
+def _write_state(state: dict, force_db: bool = False):
+    global _last_db_heartbeat
     try:
         STATE_FILE.write_text(json.dumps(state, indent=2), encoding="utf-8")
     except Exception as e:
         log.warning(f"Could not write state file: {e}")
-    try:
-        db.worker_heartbeat_write(
-            pid=state.get("pid", os.getpid()),
-            started_at=state.get("started_at", _now_str()),
-            jobs=state.get("jobs", {}),
-        )
-    except Exception as e:
-        log.warning(f"Could not write heartbeat to DB: {e}")
+    # Throttle DB heartbeat to once every 2 minutes — lightweight jobs (send, calls)
+    # run every 1-2 min and calling this on every tick wastes Supabase connections.
+    now_ts = time.time()
+    if force_db or (now_ts - _last_db_heartbeat) >= 120:
+        try:
+            db.worker_heartbeat_write(
+                pid=state.get("pid", os.getpid()),
+                started_at=state.get("started_at", _now_str()),
+                jobs=state.get("jobs", {}),
+            )
+            _last_db_heartbeat = now_ts
+        except Exception as e:
+            log.warning(f"Could not write heartbeat to DB: {e}")
 
 
 def _read_state() -> dict:
@@ -285,21 +312,13 @@ def job_enrich(state: dict, campaign_id: int | None, steps: list):
 
         try:
             with sync_playwright() as p:
-                browser = p.chromium.launch(
-                    headless=True,
-                    args=[
-                        "--no-sandbox",
-                        "--disable-setuid-sandbox",
-                        "--disable-dev-shm-usage",
-                        "--disable-blink-features=AutomationControlled",
-                    ],
-                )
+                browser = p.chromium.launch(headless=True, args=_CHROMIUM_ARGS)
                 context = browser.new_context(
                     user_agent=(
                         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
                         "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
                     ),
-                    viewport={"width": 1280, "height": 800},
+                    viewport={"width": 1024, "height": 600},
                     locale="en-US",
                 )
                 context.add_init_script(
@@ -348,29 +367,35 @@ def job_enrich(state: dict, campaign_id: int | None, steps: list):
                     )
 
                     best_email = None
-                    for e in extraction.get("emails", []):
-                        try:
-                            db.insert_email(
-                                domain_id=domain_id,
-                                domain=domain,
-                                email=e["email"],
-                                source_url=e.get("source_url"),
-                                source_type=e.get("source_type"),
-                                confidence=e.get("confidence"),
-                                is_role=e.get("is_role"),
-                                has_mx=extraction.get("has_mx"),
-                                category=e.get("category"),
-                            )
-                        except Exception:
-                            pass
-                        if best_email is None or _email_score(e) > _email_score(best_email):
-                            best_email = e
-
                     snippet = extraction.get("snippet")
+                    has_mx  = extraction.get("has_mx")
                     improvement_note = _generate_improvement_note(domain, snippet) if snippet else None
 
-                    if best_email or snippet:
-                        with db.get_conn() as c:
+                    # Batch: all email inserts + lead updates in one connection per domain
+                    with db.get_conn() as c:
+                        for e in extraction.get("emails", []):
+                            try:
+                                c.execute(
+                                    "INSERT INTO emails "
+                                    "(domain_id, domain, email, source_url, source_type, "
+                                    " confidence, is_role, category, verification_status, extracted_at) "
+                                    "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) "
+                                    "ON CONFLICT (domain, email) DO NOTHING",
+                                    (
+                                        domain_id, domain, e["email"],
+                                        e.get("source_url"), e.get("source_type"),
+                                        e.get("confidence"), int(bool(e.get("is_role"))),
+                                        e.get("category"),
+                                        "valid_mx" if has_mx else "no_mx",
+                                        db.now(),
+                                    ),
+                                )
+                            except Exception:
+                                pass
+                            if best_email is None or _email_score(e) > _email_score(best_email):
+                                best_email = e
+
+                        if best_email or snippet:
                             for lid in lead_ids:
                                 if best_email:
                                     c.execute(
@@ -415,34 +440,35 @@ def job_enrich(state: dict, campaign_id: int | None, steps: list):
 
     # Phase 2: backfill AI notes for leads that already have a snippet
     # but never got an improvement_note (no browser needed here).
-    try:
-        with db.get_conn() as c:
-            note_rows = c.execute(
-                """
-                SELECT id, domain, homepage_snippet
-                FROM leads
-                WHERE improvement_note IS NULL
-                  AND homepage_snippet IS NOT NULL AND homepage_snippet != ''
-                LIMIT 20
-                """,
-            ).fetchall()
-        note_count = 0
-        for nr in note_rows:
-            note = _generate_improvement_note(nr["domain"] or "", nr["homepage_snippet"])
-            if note:
-                with db.get_conn() as c:
-                    c.execute(
-                        "UPDATE leads SET improvement_note=%s WHERE id=%s",
-                        (note, nr["id"]),
-                    )
-                note_count += 1
-        if note_count:
-            log.info(f"enrich: backfilled {note_count} AI notes from existing snippets")
-    except Exception as e:
-        log.warning(f"enrich: AI note backfill failed — {e}")
+    if os.getenv("OPENAI_API_KEY"):
+        try:
+            with db.get_conn() as c:
+                note_rows = c.execute(
+                    """
+                    SELECT id, domain, homepage_snippet
+                    FROM leads
+                    WHERE improvement_note IS NULL
+                      AND homepage_snippet IS NOT NULL AND homepage_snippet != ''
+                    LIMIT 20
+                    """,
+                ).fetchall()
+            note_count = 0
+            for nr in note_rows:
+                note = _generate_improvement_note(nr["domain"] or "", nr["homepage_snippet"])
+                if note:
+                    with db.get_conn() as c:
+                        c.execute(
+                            "UPDATE leads SET improvement_note=%s WHERE id=%s",
+                            (note, nr["id"]),
+                        )
+                    note_count += 1
+            if note_count:
+                log.info(f"enrich: backfilled {note_count} AI notes from existing snippets")
+        except Exception as e:
+            log.warning(f"enrich: AI note backfill failed — {e}")
 
     state["jobs"]["enrich"] = result
-    _write_state(state)
+    _write_state(state, force_db=True)   # enrich is heavy — always persist its result
     log.info(f"enrich: done {result}")
 
 
@@ -583,7 +609,7 @@ def job_scrape_rotation(state: dict):
             pass
 
     state["jobs"]["rotation"] = result
-    _write_state(state)
+    _write_state(state, force_db=True)   # rotation is heavy — always persist its result
 
 
 def job_calls(state: dict):

@@ -304,6 +304,14 @@ def run_scraper(searches=None, max_leads=None, output_file=None, headless=None):
                 "--disable-setuid-sandbox",
                 "--disable-dev-shm-usage",
                 "--disable-blink-features=AutomationControlled",
+                "--disable-gpu",
+                "--no-first-run",
+                "--disable-extensions",
+                "--disable-default-apps",
+                "--disable-background-networking",
+                "--disable-sync",
+                "--mute-audio",
+                "--disable-features=TranslateUI",
             ]
         )
 
@@ -313,7 +321,7 @@ def run_scraper(searches=None, max_leads=None, output_file=None, headless=None):
                 "AppleWebKit/537.36 (KHTML, like Gecko) "
                 "Chrome/122.0.0.0 Safari/537.36"
             ),
-            viewport={"width": 1280, "height": 800},
+            viewport={"width": 1024, "height": 600},
             locale="en-US",
         )
 
