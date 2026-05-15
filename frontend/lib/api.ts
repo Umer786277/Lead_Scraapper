@@ -149,4 +149,15 @@ export const api = {
     logs: (lastN = 150) => apiFetch<{ lines: string[] }>(`/api/system/logs?last_n=${lastN}`),
     triggerJob: (jobId: string) => apiFetch<{ ok: boolean; job_id: string }>(`/api/system/jobs/${jobId}/trigger`, { method: "POST" }),
   },
+
+  calls: {
+    list: (limit = 100, offset = 0) =>
+      apiFetch<{ items: unknown[] }>(`/api/calls?limit=${limit}&offset=${offset}`),
+    summary: () => apiFetch<Record<string, number>>("/api/calls/summary"),
+    queue: (leadIds: number[]) =>
+      apiFetch<{ queued: number; skipped: number; call_ids: number[] }>("/api/calls/queue", {
+        method: "POST",
+        body: JSON.stringify({ lead_ids: leadIds }),
+      }),
+  },
 };
