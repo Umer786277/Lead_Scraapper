@@ -29,6 +29,7 @@ export default function LeadsPage() {
   const [statusFilter, setStatusFilter] = useState("all");
   const [cityFilter, setCityFilter] = useState("all");
   const [countryFilter, setCountryFilter] = useState("all");
+  const [noteModal, setNoteModal] = useState<{ name: string; note: string } | null>(null);
   const [error, setError] = useState("");
 
   const fetchLeads = useCallback(async () => {
@@ -250,9 +251,12 @@ export default function LeadsPage() {
 
                     <td className="px-4 py-3 max-w-[220px]">
                       {lead.improvement_note ? (
-                        <span className="text-xs text-yellow-300/80 leading-relaxed" title={lead.improvement_note}>
-                          {lead.improvement_note.slice(0, 80)}{lead.improvement_note.length > 80 ? "…" : ""}
-                        </span>
+                        <button
+                          onClick={() => setNoteModal({ name: lead.business_name || "Lead", note: lead.improvement_note! })}
+                          className="text-xs text-yellow-300/80 leading-relaxed text-left hover:text-yellow-300 transition-colors"
+                        >
+                          {lead.improvement_note.slice(0, 60)}{lead.improvement_note.length > 60 ? "…" : ""}
+                        </button>
                       ) : <span className="text-slate-600 text-xs">—</span>}
                     </td>
 
@@ -285,6 +289,29 @@ export default function LeadsPage() {
           </div>
         )}
       </div>
+      {/* AI Note modal */}
+      {noteModal && (
+        <div
+          className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4"
+          onClick={() => setNoteModal(null)}
+        >
+          <div
+            className="bg-[#1a1d2e] border border-white/10 rounded-2xl p-6 max-w-lg w-full space-y-4"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <p className="text-xs text-slate-500 mb-0.5">AI Improvement Note</p>
+                <h3 className="text-base font-semibold text-white">{noteModal.name}</h3>
+              </div>
+              <button onClick={() => setNoteModal(null)} className="text-slate-400 hover:text-white text-xl leading-none">×</button>
+            </div>
+            <div className="bg-yellow-400/5 border border-yellow-400/20 rounded-xl px-4 py-4">
+              <p className="text-sm text-yellow-200 leading-relaxed">{noteModal.note}</p>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
