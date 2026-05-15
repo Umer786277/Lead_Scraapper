@@ -86,7 +86,10 @@ def _ensure_playwright():
 # ── Bootstrap ─────────────────────────────────────────────────
 @app.on_event("startup")
 def startup():
-    db.init_db()
+    try:
+        db.init_db()
+    except Exception as e:
+        log.error(f"DB init failed (API still starting): {e}")
     import threading
     from api import worker_runner
     # Run both in background so FastAPI responds immediately and passes Render's health check
