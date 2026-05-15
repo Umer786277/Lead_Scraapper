@@ -152,7 +152,8 @@ export const api = {
 
   calls: {
     list: (limit = 100, offset = 0) =>
-      apiFetch<{ items: unknown[] }>(`/api/calls?limit=${limit}&offset=${offset}`),
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      apiFetch<{ items: any[] }>(`/api/calls?limit=${limit}&offset=${offset}`),
     summary: () => apiFetch<Record<string, number>>("/api/calls/summary"),
     queue: (leadIds: number[]) =>
       apiFetch<{ queued: number; skipped: number; call_ids: number[] }>("/api/calls/queue", {
