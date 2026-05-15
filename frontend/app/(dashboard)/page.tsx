@@ -2,29 +2,66 @@
 
 import StatCard from "@/components/StatCard";
 import { api, type OverviewStats } from "@/lib/api";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
 export default function DashboardPage() {
   const [stats, setStats] = useState<OverviewStats | null>(null);
   const [trend, setTrend] = useState<{ day: string; n: number }[]>([]);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const [error, setError] = useState("");
 
-  useEffect(() => {
-    Promise.all([api.analytics.overview(), api.analytics.trend(14)])
-      .then(([s, t]) => { setStats(s); setTrend(t); })
-      .catch((e) => setError(e.message))
-      .finally(() => setLoading(false));
+  const fetchStats = useCallback(async (silent = false) => {
+    if (!silent) setRefreshing(true);
+    setError("");
+    try {
+      const [s, t] = await Promise.all([
+        api.analytics.overview(),
+        api.analytics.trend(14),
+      ]);
+      setStats(s);
+      setTrend(t);
+      setLastUpdated(new Date());
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
   }, []);
+
+  useEffect(() => {
+    fetchStats();
+    const interval = setInterval(() => fetchStats(true), 30_000);
+    return () => clearInterval(interval);
+  }, [fetchStats]);
 
   return (
     <div className="space-y-8">
       {/* Hero */}
-      <div className="rounded-2xl bg-gradient-to-br from-indigo-600/20 to-purple-600/10 border border-indigo-500/20 px-8 py-6">
-        <h1 className="text-2xl font-bold text-white mb-1">🎯 LeadFlow Dashboard</h1>
-        <p className="text-slate-400 text-sm">
-          Scrape · Enrich · Outreach — all in one place.
-        </p>
+      <div className="rounded-2xl bg-gradient-to-br from-indigo-600/20 to-purple-600/10 border border-indigo-500/20 px-8 py-6 flex items-center justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-bold text-white mb-1">🎯 LeadFlow Dashboard</h1>
+          <p className="text-slate-400 text-sm">
+            Scrape · Enrich · Outreach — all in one place.
+          </p>
+        </div>
+        <div className="flex flex-col items-end gap-1 shrink-0">
+          <button
+            onClick={() => fetchStats()}
+            disabled={refreshing}
+            className="flex items-center gap-2 px-3 py-1.5 text-xs bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg text-slate-300 transition disabled:opacity-50"
+          >
+            <span className={refreshing ? "animate-spin" : ""}>↻</span>
+            {refreshing ? "Refreshing…" : "Refresh"}
+          </button>
+          {lastUpdated && (
+            <span className="text-xs text-slate-600">
+              Updated {lastUpdated.toLocaleTimeString()}
+            </span>
+          )}
+        </div>
       </div>
 
       {error && (
