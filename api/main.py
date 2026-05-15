@@ -86,10 +86,11 @@ def _ensure_playwright():
 # ── Bootstrap ─────────────────────────────────────────────────
 @app.on_event("startup")
 def startup():
-    _ensure_playwright()
     db.init_db()
     import threading
     from api import worker_runner
+    # Run both in background so FastAPI responds immediately and passes Render's health check
+    threading.Thread(target=_ensure_playwright, daemon=True).start()
     threading.Thread(target=worker_runner.start, daemon=True).start()
 
 

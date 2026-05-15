@@ -253,6 +253,14 @@ CREATE INDEX IF NOT EXISTS idx_drafts_thread      ON negotiation_drafts(thread_i
 """
 
 
+_MIGRATIONS = [
+    "ALTER TABLE leads ADD COLUMN IF NOT EXISTS maps_url TEXT",
+    "ALTER TABLE leads ADD COLUMN IF NOT EXISTS improvement_note TEXT",
+    "ALTER TABLE leads ADD COLUMN IF NOT EXISTS last_review_days INTEGER",
+    "ALTER TABLE leads ADD COLUMN IF NOT EXISTS reviews INTEGER",
+]
+
+
 def init_db():
     if not DATABASE_URL:
         raise RuntimeError(
@@ -265,6 +273,9 @@ def init_db():
     with get_conn() as c:
         with c.cursor() as cur:
             for stmt in statements:
+                cur.execute(stmt)
+            # Additive migrations — safe to re-run (IF NOT EXISTS)
+            for stmt in _MIGRATIONS:
                 cur.execute(stmt)
 
 
