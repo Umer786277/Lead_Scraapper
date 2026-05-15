@@ -21,6 +21,7 @@ if sys.platform == "win32":
 from playwright.sync_api import sync_playwright
 
 import db
+import locks
 from email_extractor import extract_from_domain
 from google_maps_scraper import scrape_place_details, search_google_maps
 
@@ -120,7 +121,7 @@ def run_pipeline(searches, max_leads=20, headless=True, enrich_emails=True, on_e
     domains_scanned = 0
 
     try:
-        with sync_playwright() as p:
+        with locks.browser_lock, sync_playwright() as p:
             browser = p.chromium.launch(
                 headless=headless,
                 args=[

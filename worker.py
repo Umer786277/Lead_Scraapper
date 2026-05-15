@@ -22,9 +22,9 @@ import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-# Only one Playwright/Chromium instance at a time — Render free tier has ~512 MB RAM.
-# job_enrich skips its tick if the lock is held; job_scrape_rotation holds it during scraping.
-_browser_lock = threading.Lock()
+# Shared RLock — serialises ALL Chromium launches (API pipeline + enrich + rotation).
+# Imported from locks.py so api/routers/pipeline.py can share the same object.
+from locks import browser_lock as _browser_lock
 
 # Throttle DB heartbeat writes — lightweight jobs (send/calls) run every 1-2 min
 # but we only need to persist heartbeat to DB once every 2 min.
