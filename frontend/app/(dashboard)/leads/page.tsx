@@ -27,6 +27,8 @@ export default function LeadsPage() {
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
+  const [cityFilter, setCityFilter] = useState("all");
+  const [countryFilter, setCountryFilter] = useState("all");
   const [error, setError] = useState("");
 
   const fetchLeads = useCallback(async () => {
@@ -66,7 +68,18 @@ export default function LeadsPage() {
     URL.revokeObjectURL(url);
   }
 
-  const activeBucket = BUCKETS.find((b) => b.key === bucket)!;
+  const activeBucket = BUCKETS.find((b) => b.key === bucket)!
+
+  // Derived unique cities/countries from loaded leads
+  const uniqueCities    = ["all", ...Array.from(new Set(leads.map(l => l.city).filter(Boolean))).sort()] as string[];
+  const uniqueCountries = ["all", ...Array.from(new Set(leads.map(l => l.country).filter(Boolean))).sort()] as string[];
+
+  // Client-side city/country filter applied on top of server results
+  const visibleLeads = leads.filter(l => {
+    if (cityFilter    !== "all" && l.city    !== cityFilter)    return false;
+    if (countryFilter !== "all" && l.country !== countryFilter) return false;
+    return true;
+  });;
 
   return (
     <div className="space-y-6">
@@ -119,6 +132,24 @@ export default function LeadsPage() {
             <option key={s} value={s} className="bg-[#1a1d2e]">{s === "all" ? "All statuses" : s}</option>
           ))}
         </select>
+        <select
+          value={countryFilter}
+          onChange={(e) => { setCountryFilter(e.target.value); setCityFilter("all"); }}
+          className="bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-indigo-500/40"
+        >
+          {uniqueCountries.map((c) => (
+            <option key={c} value={c} className="bg-[#1a1d2e]">{c === "all" ? "All countries" : c}</option>
+          ))}
+        </select>
+        <select
+          value={cityFilter}
+          onChange={(e) => setCityFilter(e.target.value)}
+          className="bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-indigo-500/40"
+        >
+          {uniqueCities.map((c) => (
+            <option key={c} value={c} className="bg-[#1a1d2e]">{c === "all" ? "All cities" : c}</option>
+          ))}
+        </select>
         <div className="flex-1" />
         <button
           onClick={downloadCSV}
@@ -166,7 +197,7 @@ export default function LeadsPage() {
                   </td>
                 </tr>
               ) : (
-                leads.map((lead) => (
+                visibleLeads.map((lead) => (
                   <tr key={lead.id} className="hover:bg-white/3 transition-colors">
                     <td className="px-4 py-3 text-white font-medium max-w-[200px] truncate">
                       {lead.business_name || <span className="text-slate-500">—</span>}
@@ -182,7 +213,10 @@ export default function LeadsPage() {
                       <td className="px-4 py-3 text-slate-300 text-xs">{lead.domain}</td>
                     )}
 
-                    <td className="px-4 py-3 text-slate-400">{lead.city || "—"}</td>
+                    <td className="px-4 py-3 text-slate-400 text-xs">
+                      <div>{lead.city || "—"}</div>
+                      {lead.country && <div className="text-slate-600">{lead.country}</div>}
+                    </td>
 
                     <td className="px-4 py-3 text-slate-400 text-xs">
                       {lead.reviews != null ? (
@@ -247,7 +281,7 @@ export default function LeadsPage() {
         </div>
         {!loading && leads.length > 0 && (
           <div className="px-4 py-3 border-t border-white/8 text-xs text-slate-500">
-            Showing {leads.length} lead{leads.length !== 1 ? "s" : ""}
+            Showing {visibleLeads.length}{visibleLeads.length !== leads.length ? ` of ${leads.length}` : ""} lead{visibleLeads.length !== 1 ? "s" : ""}
           </div>
         )}
       </div>
