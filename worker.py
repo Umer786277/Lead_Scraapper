@@ -17,8 +17,13 @@ import json
 import logging
 import os
 import sys
+import threading
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+
+# Only one Playwright/Chromium instance at a time — Render free tier has ~512 MB RAM.
+# job_enrich skips its tick if the lock is held; job_scrape_rotation holds it during scraping.
+_browser_lock = threading.Lock()
 
 # Load .env BEFORE any module that calls os.getenv at import time —
 # otherwise SMTP / IMAP / OPENAI env vars come back empty on first job tick.
@@ -272,128 +277,137 @@ def job_enrich(state: dict, campaign_id: int | None, steps: list):
         from playwright.sync_api import sync_playwright
         from email_extractor import extract_from_domain
 
-        with sync_playwright() as p:
-            browser = p.chromium.launch(
-                headless=True,
-                args=[
-                    "--no-sandbox",
-                    "--disable-setuid-sandbox",
-                    "--disable-dev-shm-usage",
-                    "--disable-blink-features=AutomationControlled",
-                ],
-            )
-            context = browser.new_context(
-                user_agent=(
-                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                    "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
-                ),
-                viewport={"width": 1280, "height": 800},
-                locale="en-US",
-            )
-            context.add_init_script(
-                "Object.defineProperty(navigator, 'webdriver', { get: () => undefined });"
-            )
+        if not _browser_lock.acquire(blocking=False):
+            log.info("enrich: browser lock held by another job — skipping this tick")
+            state["jobs"]["enrich"] = result
+            _write_state(state)
+            return
 
-            def _block(route):
-                if route.request.resource_type in ("image", "media", "font"):
-                    return route.abort()
-                return route.continue_()
-
-            context.route("**/*", _block)
-
-            for row in rows:
-                domain   = row["domain"]
-                lead_ids = row["lead_ids"]
-                log.info(f"enrich: {domain} (leads: {lead_ids})")
-
-                try:
-                    extraction = extract_from_domain(domain, context)
-                except Exception as e:
-                    log.warning(f"enrich: {domain} failed — {e}")
-                    # Still record the domain so we don't retry every 30 s
-                    try:
-                        db.insert_domain(
-                            run_id=None, domain=domain, status="failed",
-                            has_mx=None, pages_visited=0, emails_found=0,
-                            error=str(e)[:200],
-                        )
-                    except Exception:
-                        pass
-                    continue
-
-                status = (
-                    "scraped" if not extraction.get("error")
-                    else ("no_mx" if extraction.get("error") == "no_mx" else "failed")
+        try:
+            with sync_playwright() as p:
+                browser = p.chromium.launch(
+                    headless=True,
+                    args=[
+                        "--no-sandbox",
+                        "--disable-setuid-sandbox",
+                        "--disable-dev-shm-usage",
+                        "--disable-blink-features=AutomationControlled",
+                    ],
                 )
-                domain_id = db.insert_domain(
-                    run_id=None,
-                    domain=domain,
-                    status=status,
-                    has_mx=extraction.get("has_mx"),
-                    pages_visited=extraction.get("pages_visited", 0),
-                    emails_found=len(extraction.get("emails", [])),
-                    error=extraction.get("error"),
+                context = browser.new_context(
+                    user_agent=(
+                        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                        "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
+                    ),
+                    viewport={"width": 1280, "height": 800},
+                    locale="en-US",
+                )
+                context.add_init_script(
+                    "Object.defineProperty(navigator, 'webdriver', { get: () => undefined });"
                 )
 
-                best_email = None
-                for e in extraction.get("emails", []):
+                def _block(route):
+                    if route.request.resource_type in ("image", "media", "font"):
+                        return route.abort()
+                    return route.continue_()
+
+                context.route("**/*", _block)
+
+                for row in rows:
+                    domain   = row["domain"]
+                    lead_ids = row["lead_ids"]
+                    log.info(f"enrich: {domain} (leads: {lead_ids})")
+
                     try:
-                        db.insert_email(
-                            domain_id=domain_id,
-                            domain=domain,
-                            email=e["email"],
-                            source_url=e.get("source_url"),
-                            source_type=e.get("source_type"),
-                            confidence=e.get("confidence"),
-                            is_role=e.get("is_role"),
-                            has_mx=extraction.get("has_mx"),
-                            category=e.get("category"),
-                        )
-                    except Exception:
-                        pass
-                    if best_email is None or _email_score(e) > _email_score(best_email):
-                        best_email = e
+                        extraction = extract_from_domain(domain, context)
+                    except Exception as e:
+                        log.warning(f"enrich: {domain} failed — {e}")
+                        # Still record the domain so we don't retry every 30 s
+                        try:
+                            db.insert_domain(
+                                run_id=None, domain=domain, status="failed",
+                                has_mx=None, pages_visited=0, emails_found=0,
+                                error=str(e)[:200],
+                            )
+                        except Exception:
+                            pass
+                        continue
 
-                snippet = extraction.get("snippet")
-                improvement_note = _generate_improvement_note(domain, snippet) if snippet else None
-
-                if best_email or snippet:
-                    with db.get_conn() as c:
-                        for lid in lead_ids:
-                            if best_email:
-                                c.execute(
-                                    "UPDATE leads SET email=%s "
-                                    "WHERE id=%s AND (email IS NULL OR email='')",
-                                    (best_email["email"], lid),
-                                )
-                            if snippet:
-                                c.execute(
-                                    "UPDATE leads SET homepage_snippet=%s "
-                                    "WHERE id=%s AND (homepage_snippet IS NULL OR homepage_snippet='')",
-                                    (snippet, lid),
-                                )
-                            if improvement_note:
-                                c.execute(
-                                    "UPDATE leads SET improvement_note=%s "
-                                    "WHERE id=%s AND (improvement_note IS NULL OR improvement_note='')",
-                                    (improvement_note, lid),
-                                )
-                if best_email:
-                    result["enriched"] += 1
-                    log.info(
-                        f"enrich: {domain} → {best_email['email']} "
-                        f"({best_email['confidence']})"
+                    status = (
+                        "scraped" if not extraction.get("error")
+                        else ("no_mx" if extraction.get("error") == "no_mx" else "failed")
+                    )
+                    domain_id = db.insert_domain(
+                        run_id=None,
+                        domain=domain,
+                        status=status,
+                        has_mx=extraction.get("has_mx"),
+                        pages_visited=extraction.get("pages_visited", 0),
+                        emails_found=len(extraction.get("emails", [])),
+                        error=extraction.get("error"),
                     )
 
-                    # Enroll each lead in the auto outreach campaign
-                    if campaign_id and steps:
-                        for lid in lead_ids:
-                            if _enroll_lead(lid, campaign_id, steps):
-                                result["enrolled"] += 1
-                else:
-                    log.info(f"enrich: {domain} → no emails found")
+                    best_email = None
+                    for e in extraction.get("emails", []):
+                        try:
+                            db.insert_email(
+                                domain_id=domain_id,
+                                domain=domain,
+                                email=e["email"],
+                                source_url=e.get("source_url"),
+                                source_type=e.get("source_type"),
+                                confidence=e.get("confidence"),
+                                is_role=e.get("is_role"),
+                                has_mx=extraction.get("has_mx"),
+                                category=e.get("category"),
+                            )
+                        except Exception:
+                            pass
+                        if best_email is None or _email_score(e) > _email_score(best_email):
+                            best_email = e
 
-            browser.close()
+                    snippet = extraction.get("snippet")
+                    improvement_note = _generate_improvement_note(domain, snippet) if snippet else None
+
+                    if best_email or snippet:
+                        with db.get_conn() as c:
+                            for lid in lead_ids:
+                                if best_email:
+                                    c.execute(
+                                        "UPDATE leads SET email=%s "
+                                        "WHERE id=%s AND (email IS NULL OR email='')",
+                                        (best_email["email"], lid),
+                                    )
+                                if snippet:
+                                    c.execute(
+                                        "UPDATE leads SET homepage_snippet=%s "
+                                        "WHERE id=%s AND (homepage_snippet IS NULL OR homepage_snippet='')",
+                                        (snippet, lid),
+                                    )
+                                if improvement_note:
+                                    c.execute(
+                                        "UPDATE leads SET improvement_note=%s "
+                                        "WHERE id=%s AND (improvement_note IS NULL OR improvement_note='')",
+                                        (improvement_note, lid),
+                                    )
+                    if best_email:
+                        result["enriched"] += 1
+                        log.info(
+                            f"enrich: {domain} → {best_email['email']} "
+                            f"({best_email['confidence']})"
+                        )
+
+                        # Enroll each lead in the auto outreach campaign
+                        if campaign_id and steps:
+                            for lid in lead_ids:
+                                if _enroll_lead(lid, campaign_id, steps):
+                                    result["enrolled"] += 1
+                    else:
+                        log.info(f"enrich: {domain} → no emails found")
+
+                browser.close()
+        finally:
+            _browser_lock.release()
 
     except Exception as e:
         log.error(f"enrich job crashed: {e}", exc_info=True)
@@ -504,17 +518,18 @@ def job_scrape_rotation(state: dict):
 
         # Local import — avoids loading Playwright at worker startup.
         from pipeline import run_pipeline
-        run_pipeline(
-            searches=[{
-                "niche":   q["niche"],
-                "city":    q["city"],
-                "country": q["country"],
-            }],
-            max_leads=target,
-            headless=True,
-            enrich_emails=False,    # the 30s enrich job handles emails
-            on_event=lambda kind, msg, **_: None,
-        )
+        with _browser_lock:
+            run_pipeline(
+                searches=[{
+                    "niche":   q["niche"],
+                    "city":    q["city"],
+                    "country": q["country"],
+                }],
+                max_leads=target,
+                headless=True,
+                enrich_emails=False,    # the 30s enrich job handles emails
+                on_event=lambda kind, msg, **_: None,
+            )
 
         after = count_leads_for(q["city"], q["country"])
         leads_added = max(0, after - before)
