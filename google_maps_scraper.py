@@ -135,7 +135,7 @@ def scrape_place_details(page, url):
     }
 
     try:
-        page.goto(url, wait_until="domcontentloaded", timeout=20000)
+        page.goto(url, wait_until="domcontentloaded", timeout=60000)
         try:
             page.wait_for_selector('h1.DUwDvf, h1[data-attrid="title"]', timeout=8000)
         except Exception:

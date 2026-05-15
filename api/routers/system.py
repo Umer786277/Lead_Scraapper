@@ -14,7 +14,7 @@ router = APIRouter()
 
 STATE_FILE = Path(__file__).resolve().parent.parent.parent / "worker_state.json"
 
-VALID_JOBS = {"enrich", "send", "inbox", "rotation"}
+VALID_JOBS = {"enrich", "send", "inbox", "rotation", "calls"}
 
 
 @router.get("/status")
@@ -40,7 +40,10 @@ def status(user_id: str = Depends(get_user_id)):
         except Exception:
             pass
 
-    queue = db.send_queue_summary()
+    try:
+        queue = db.send_queue_summary()
+    except Exception:
+        queue = {}
 
     config = {
         "database":  bool(os.getenv("DATABASE_URL")),
