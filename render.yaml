@@ -1,21 +1,35 @@
 services:
-  # ── FastAPI backend (includes background worker) ──────────────
-  # Worker jobs run inside this process via APScheduler BackgroundScheduler.
-  # Keep UptimeRobot pinging / every 5 min so free-tier service never sleeps.
+  # ── FastAPI backend ──────────────────────────────────────────
   - type: web
     name: leadflow-api
     runtime: python
     buildCommand: pip install -r requirements.txt
     startCommand: uvicorn api.main:app --host 0.0.0.0 --port $PORT
     envVars:
+      - key: RUN_WORKER_IN_API
+        value: "false"
       - key: PLAYWRIGHT_BROWSERS_PATH
         value: "/opt/render/project/src/.playwright"
       - key: DATABASE_URL
         sync: false
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: SUPABASE_INVITE_REDIRECT_URL
+        sync: false
       - key: SUPABASE_JWT_SECRET
         sync: false
-      - key: OPENAI_API_KEY
+      - key: SUPER_ADMIN_USER_IDS
         sync: false
+      - key: GOOGLE_AI_STUDIO_API_KEY
+        sync: false
+      - key: GOOGLE_AI_STUDIO_MODEL
+        value: "gemini-3.6-flash"
+      - key: GOOGLE_AI_STUDIO_TEMPERATURE
+        value: "0.7"
+      - key: GOOGLE_AI_STUDIO_MAX_TOKENS
+        value: "150"
       - key: TAVILY_API_KEY
         sync: false
       - key: SMTP_HOST
@@ -40,6 +54,95 @@ services:
         value: "17"
       - key: SEND_WEEKDAYS_ONLY
         value: "true"
+      # Outreach send budgets — cap emails sent per day / per hour across the
+      # whole pipeline (worker + manual). 0 = unlimited (unset = unlimited).
+      - key: SEND_MAX_PER_DAY
+        sync: false
+      - key: SEND_MAX_PER_HOUR
+        sync: false
+      # Fernet key used to encrypt per-org SMTP/IMAP passwords at rest.
+      - key: CREDENTIALS_KEY
+        sync: false
+      - key: SCRAPE_WORKER_CONCURRENCY
+        value: "2"
+
+  # ── Always-on automation worker ──────────────────────────────
+  - type: worker
+    name: leadflow-worker
+    runtime: python
+    buildCommand: pip install -r requirements.txt && playwright install chromium
+    startCommand: python worker.py
+    envVars:
+      - key: PLAYWRIGHT_BROWSERS_PATH
+        value: "/opt/render/project/src/.playwright"
+      - key: DATABASE_URL
+        sync: false
+      - key: GOOGLE_AI_STUDIO_API_KEY
+        sync: false
+      - key: TAVILY_API_KEY
+        sync: false
+      - key: SMTP_HOST
+        sync: false
+      - key: SMTP_PORT
+        sync: false
+      - key: SMTP_USER
+        sync: false
+      - key: SMTP_PASSWORD
+        sync: false
+      - key: SMTP_FROM
+        sync: false
+      - key: CREDENTIALS_KEY
+        sync: false
+      - key: SEND_MAX_PER_DAY
+        sync: false
+      - key: SEND_MAX_PER_HOUR
+        sync: false
+      - key: SEND_MAX_PER_DOMAIN_PER_HOUR
+        value: "10"
+      - key: OUTBOUND_MAX_ATTEMPTS
+        value: "8"
+      - key: SCRAPE_WORKER_CONCURRENCY
+        value: "2"
+
+  # ── Always-on reply and booking worker ───────────────────────
+  - type: worker
+    name: leadflow-replies-worker
+    runtime: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: python worker_replies.py
+    envVars:
+      - key: DATABASE_URL
+        sync: false
+      - key: GOOGLE_AI_STUDIO_API_KEY
+        sync: false
+      - key: SMTP_HOST
+        sync: false
+      - key: SMTP_PORT
+        sync: false
+      - key: SMTP_USER
+        sync: false
+      - key: SMTP_PASSWORD
+        sync: false
+      - key: SMTP_FROM
+        sync: false
+      - key: IMAP_HOST
+        sync: false
+      - key: IMAP_USER
+        sync: false
+      - key: IMAP_PASSWORD
+        sync: false
+      - key: BOOKING_LINK
+        sync: false
+      - key: CREDENTIALS_KEY
+        sync: false
+      - key: SEND_MAX_PER_DAY
+        sync: false
+      - key: SEND_MAX_PER_HOUR
+        sync: false
+      - key: SEND_MAX_PER_DOMAIN_PER_HOUR
+        value: "10"
+      - key: OUTBOUND_MAX_ATTEMPTS
+        value: "8"
 
   # ── Next.js frontend ──────────────────────────────────────────
   - type: web

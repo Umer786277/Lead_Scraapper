@@ -30,7 +30,7 @@ DEFAULT_BACKOFF_HOURS = 6   # fresh queries with no signal yet
 
 # ── Schedule registration ─────────────────────────────────────
 def register_schedule(user_id: str, niche: str, country: str,
-                      target_leads: int = 20) -> dict:
+                      target_leads: int = 20, org_id: str | None = None) -> dict:
     """Create a schedule and seed scrape_queries for every city in the country.
 
     Idempotent on the (niche, city, country) UNIQUE constraint — re-registering
@@ -49,49 +49,50 @@ def register_schedule(user_id: str, niche: str, country: str,
 
     with db.get_conn() as c:
         cur = c.execute(
-            "INSERT INTO scrape_schedules (user_id, niche, country, target_leads) "
-            "VALUES (%s, %s, %s, %s) RETURNING id",
-            (user_id, niche, country, target_leads),
+            "INSERT INTO scrape_schedules (org_id, user_id, niche, country, target_leads) "
+            "VALUES (%s, %s, %s, %s, %s) RETURNING id",
+            (db.org_id_or_default(org_id), user_id, niche, country, target_leads),
         )
         schedule_id = cur.fetchone()["id"]
 
-        # Seed queries — one per (niche, city, country). Existing rows keep
-        # their backoff state thanks to ON CONFLICT DO NOTHING.
+        # Seed queries — one per (org, niche, city, country). Existing rows
+        # keep their backoff state thanks to ON CONFLICT DO NOTHING.
         for city in cities:
             c.execute(
-                "INSERT INTO scrape_queries (niche, city, country) "
-                "VALUES (%s, %s, %s) "
-                "ON CONFLICT (niche, city, country) DO NOTHING",
-                (niche, city, country),
+                "INSERT INTO scrape_queries (org_id, niche, city, country) "
+                "VALUES (%s, %s, %s, %s) "
+                "ON CONFLICT (org_id, niche, city, country) DO NOTHING",
+                (db.org_id_or_default(org_id), niche, city, country),
             )
 
     return {"schedule_id": schedule_id, "queries_seeded": len(cities)}
 
 
-def list_schedules(user_id: str) -> list[dict]:
+def list_schedules(org_id: str | None = None) -> list[dict]:
+    clause, args = db._scope(org_id, "org_id")
     with db.get_conn() as c:
         rows = c.execute(
             "SELECT id, niche, country, target_leads, status, created_at "
-            "FROM scrape_schedules WHERE user_id = %s "
+            f"FROM scrape_schedules WHERE 1=1{clause} "
             "ORDER BY created_at DESC",
-            (user_id,),
+            tuple(args),
         ).fetchall()
     return [dict(r) for r in rows]
 
 
-def cancel_schedule(user_id: str, schedule_id: int) -> bool:
-    """Mark a schedule paused. Query rows stay (other users may share them)."""
+def cancel_schedule(org_id: str, schedule_id: int) -> bool:
+    """Mark a schedule paused for an organization."""
     with db.get_conn() as c:
         cur = c.execute(
             "UPDATE scrape_schedules SET status = 'paused' "
-            "WHERE id = %s AND user_id = %s",
-            (schedule_id, user_id),
+            "WHERE id = %s AND org_id = %s",
+            (schedule_id, org_id),
         )
         return cur.rowcount > 0
 
 
 # ── Query selection ───────────────────────────────────────────
-def pick_next_query() -> dict | None:
+def pick_next_query(org_id: str | None = None) -> dict | None:
     """Pick the most-deserving due query atomically.
 
     SKIP LOCKED so multiple workers can run in parallel without picking the
@@ -99,7 +100,7 @@ def pick_next_query() -> dict | None:
     """
     with db.get_conn() as c:
         # Find a query that:
-        #   - Has at least one active schedule covering its (niche, country)
+        #   - Has at least one active schedule covering its (org, niche, country)
         #   - Is due (next_run_at NULL or in the past)
         # Order by: never scraped first, then oldest scrape, then fewest leads.
         row = c.execute(
@@ -110,25 +111,28 @@ def pick_next_query() -> dict | None:
                 SELECT 1 FROM scrape_schedules s
                 WHERE s.niche   = q.niche
                   AND s.country = q.country
+                  AND s.org_id  = q.org_id
                   AND s.status  = 'active'
             )
               AND (q.next_run_at IS NULL OR q.next_run_at <= CURRENT_TIMESTAMP)
+              AND (%s::uuid IS NULL OR q.org_id = %s::uuid)
             ORDER BY q.last_scraped_at NULLS FIRST,
                      q.lead_count ASC
             FOR UPDATE SKIP LOCKED
             LIMIT 1
-            """
+            """,
+            (org_id, org_id),
         ).fetchone()
     return dict(row) if row else None
 
 
-def query_target_leads(niche: str, country: str) -> int:
-    """The largest target_leads of any active schedule covering this query."""
+def query_target_leads(org_id: str, niche: str, country: str) -> int:
+    """The largest target_leads of any active schedule for this org."""
     with db.get_conn() as c:
         row = c.execute(
             "SELECT MAX(target_leads) AS n FROM scrape_schedules "
-            "WHERE niche = %s AND country = %s AND status = 'active'",
-            (niche, country),
+            "WHERE org_id = %s AND niche = %s AND country = %s AND status = 'active'",
+            (org_id, niche, country),
         ).fetchone()
     return (row and row["n"]) or 20
 
@@ -205,10 +209,11 @@ def record_run_result(query_id: int, leads_added: int, target: int,
 
 # ── Helper: count existing leads for a (city, country) — used by the
 #    worker to compute leads_added from a delta.
-def count_leads_for(city: str, country: str) -> int:
+def count_leads_for(city: str, country: str, org_id: str | None = None) -> int:
+    clause, args = db._scope(org_id, "org_id")
     with db.get_conn() as c:
         row = c.execute(
-            "SELECT COUNT(*) AS n FROM leads WHERE city = %s AND country = %s",
-            (city, country),
+            f"SELECT COUNT(*) AS n FROM leads WHERE city = %s AND country = %s{clause}",
+            (city, country, *args),
         ).fetchone()
     return (row and row["n"]) or 0

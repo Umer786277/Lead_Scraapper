@@ -5,7 +5,7 @@ Strategy (hybrid):
   1. Static curated list — covers the 6 most common SaaS-target countries
      (UK, US, AU, CA, IE, NZ). Zero cost, instant.
   2. Cache table `country_cities` — for countries fetched at runtime.
-  3. LLM fallback — if neither hit, call gpt-4o-mini once for the country,
+  3. LLM fallback — if neither hit, ask Gemini once for the country,
      persist to cache, return.
 
 Public API:
@@ -125,7 +125,7 @@ def cities_for(country: str) -> list[str]:
     if cached:
         return cached
 
-    # 3) LLM fallback (lazy import — avoids loading openai client unless needed)
+    # 3) LLM fallback (lazy import — avoids loading the AI client unless needed)
     try:
         from llm import fetch_cities
     except Exception:

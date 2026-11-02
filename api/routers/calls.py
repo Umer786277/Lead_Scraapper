@@ -6,7 +6,7 @@ import logging
 from typing import List
 
 import db
-from api.deps import get_user_id
+from api.deps import get_org_id
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 
@@ -19,40 +19,39 @@ class QueueCallsBody(BaseModel):
 
 
 @router.get("")
-def list_calls(limit: int = 100, offset: int = 0, user_id: str = Depends(get_user_id)):
-    return {"items": db.list_calls(limit=limit, offset=offset)}
+def list_calls(limit: int = 100, offset: int = 0, org_id: str = Depends(get_org_id)):
+    return {"items": db.list_calls(limit=limit, offset=offset, org_id=org_id)}
 
 
 @router.get("/summary")
-def calls_summary(user_id: str = Depends(get_user_id)):
-    return db.calls_summary()
+def calls_summary(org_id: str = Depends(get_org_id)):
+    return db.calls_summary(org_id=org_id)
 
 
 @router.post("/queue")
-def queue_calls(body: QueueCallsBody, user_id: str = Depends(get_user_id)):
+def queue_calls(body: QueueCallsBody, org_id: str = Depends(get_org_id)):
     """Queue leads (must have phone numbers) for outbound calling."""
     queued, skipped = [], []
     for lid in body.lead_ids:
-        lead = db.get_lead(lid)
+        lead = db.get_lead(lid, org_id=org_id)
         if not lead or not lead.get("phone"):
             skipped.append(lid)
             continue
-        call_id = db.queue_call(lid)
+        call_id = db.queue_call(lid, org_id=org_id)
         queued.append(call_id)
     return {"queued": len(queued), "skipped": len(skipped), "call_ids": queued}
 
 
 @router.post("/dispatch/{call_id}")
-def dispatch_now(call_id: int, user_id: str = Depends(get_user_id)):
+def dispatch_now(call_id: int, org_id: str = Depends(get_org_id)):
     """Immediately dispatch a single queued call via Vapi."""
     from voice_caller import dispatch_call
-    calls = db.list_calls(limit=1, offset=0)
-    # find by id
     with db.get_conn() as c:
         row = c.execute(
             "SELECT c.*, l.business_name, l.phone, l.city, l.country, l.website "
-            "FROM calls c JOIN leads l ON l.id=c.lead_id WHERE c.id=%s",
-            (call_id,),
+            "FROM calls c JOIN leads l ON l.id=c.lead_id "
+            "WHERE c.id=%s AND c.org_id=%s",
+            (call_id, org_id),
         ).fetchone()
     if not row:
         raise HTTPException(status_code=404, detail="Call not found")
@@ -61,11 +60,11 @@ def dispatch_now(call_id: int, user_id: str = Depends(get_user_id)):
         raise HTTPException(status_code=400, detail=f"Call is already {row['status']}")
     try:
         vapi = dispatch_call(row)
-        db.update_call(call_id, status="initiated",
+        db.update_call(call_id, org_id=org_id, status="initiated",
                        vapi_call_id=vapi.get("id"), initiated_at=db.now())
         return {"ok": True, "vapi_call_id": vapi.get("id")}
     except Exception as e:
-        db.update_call(call_id, status="failed", notes=str(e)[:200])
+        db.update_call(call_id, org_id=org_id, status="failed", notes=str(e)[:200])
         raise HTTPException(status_code=502, detail=str(e))
 
 

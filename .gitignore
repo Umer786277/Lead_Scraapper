@@ -5,5 +5,8 @@ __pycache__/
 *.pyo
 data/
 worker_state.json
+worker_replies_state.json
+.browser.lock
 leads_output.xlsx
 *.db
+.aider*

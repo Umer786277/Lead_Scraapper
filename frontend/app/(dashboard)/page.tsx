@@ -2,6 +2,16 @@
 
 import StatCard from "@/components/StatCard";
 import { api, type OverviewStats } from "@/lib/api";
+import {
+  Mail,
+  Phone,
+  RefreshCw,
+  Rocket,
+  Search,
+  Target,
+  Users,
+  XCircle,
+} from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 
 export default function DashboardPage() {
@@ -42,7 +52,9 @@ export default function DashboardPage() {
       {/* Hero */}
       <div className="rounded-2xl bg-gradient-to-br from-indigo-600/20 to-purple-600/10 border border-indigo-500/20 px-8 py-6 flex items-center justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-bold text-white mb-1">🎯 LeadFlow Dashboard</h1>
+          <h1 className="flex items-center gap-2 text-2xl font-bold text-white mb-1">
+            <Target className="text-indigo-400" size={26} /> Missa Dashboard
+          </h1>
           <p className="text-slate-400 text-sm">
             Scrape · Enrich · Outreach — all in one place.
           </p>
@@ -53,7 +65,7 @@ export default function DashboardPage() {
             disabled={refreshing}
             className="flex items-center gap-2 px-3 py-1.5 text-xs bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg text-slate-300 transition disabled:opacity-50"
           >
-            <span className={refreshing ? "animate-spin" : ""}>↻</span>
+            <RefreshCw size={13} className={refreshing ? "animate-spin" : ""} />
             {refreshing ? "Refreshing…" : "Refresh"}
           </button>
           {lastUpdated && (
@@ -93,10 +105,10 @@ export default function DashboardPage() {
           <div>
             <h2 className="text-sm font-semibold text-slate-400 uppercase tracking-wider mb-3">Lead pipeline</h2>
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-              <StatCard label="📞 Ready to call"       value={stats.leads_callable.toLocaleString()}   color="green" />
-              <StatCard label="📧 Ready to email"      value={stats.leads_emailable.toLocaleString()}  color="indigo" />
-              <StatCard label="🔍 Pending extraction"  value={stats.leads_pending.toLocaleString()}    color="yellow" sub="worker will enrich" />
-              <StatCard label="❌ No contact info"     value={stats.leads_no_contact.toLocaleString()} color="red" />
+              <StatCard label="Ready to call"       value={stats.leads_callable.toLocaleString()}   color="green"  icon={Phone} />
+              <StatCard label="Ready to email"      value={stats.leads_emailable.toLocaleString()}  color="indigo" icon={Mail} />
+              <StatCard label="Pending extraction"  value={stats.leads_pending.toLocaleString()}    color="yellow" icon={Search} sub="worker will enrich" />
+              <StatCard label="No contact info"     value={stats.leads_no_contact.toLocaleString()} color="red"    icon={XCircle} />
             </div>
           </div>
 
@@ -136,16 +148,16 @@ export default function DashboardPage() {
         <h2 className="text-sm font-semibold text-slate-400 uppercase tracking-wider mb-3">Quick actions</h2>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           {[
-            { href: "/scrape",   icon: "🚀", title: "Scrape & Enrich",  desc: "Google Maps → leads → emails in one click" },
-            { href: "/leads",    icon: "👥", title: "View Leads",        desc: "Browse, filter, and export your lead pipeline" },
-            { href: "/outreach", icon: "✉️",  title: "Outreach",         desc: "Campaigns, templates, send queue" },
-          ].map(({ href, icon, title, desc }) => (
+            { href: "/scrape",   icon: Rocket, title: "Scrape & Enrich",  desc: "Google Maps → leads → emails in one click" },
+            { href: "/leads",    icon: Users,  title: "View Leads",        desc: "Browse, filter, and export your lead pipeline" },
+            { href: "/outreach", icon: Mail,   title: "Outreach",         desc: "Campaigns, templates, send queue" },
+          ].map(({ href, icon: Icon, title, desc }) => (
             <a
               key={href}
               href={href}
               className="group rounded-2xl border border-white/8 bg-white/3 hover:bg-white/6 hover:border-indigo-500/30 px-6 py-5 transition-all"
             >
-              <div className="text-2xl mb-2">{icon}</div>
+              <Icon size={24} className="text-indigo-400 mb-2" />
               <div className="font-semibold text-white mb-1">{title}</div>
               <div className="text-sm text-slate-400">{desc}</div>
             </a>

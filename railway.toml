@@ -3,7 +3,7 @@ builder = "dockerfile"
 dockerfilePath = "Dockerfile"
 
 [deploy]
-# Railway injects $PORT — supervisord passes it through to Streamlit.
+# Railway injects $PORT for the FastAPI service.
 healthcheckPath = "/"
 healthcheckTimeout = 120
 restartPolicyType = "on_failure"

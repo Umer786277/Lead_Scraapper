@@ -1,8 +1,10 @@
 "use client";
 
+import { api, setActiveOrgId } from "@/lib/api";
 import { createClient } from "@/lib/supabase";
+import { Target } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -14,6 +16,51 @@ export default function LoginPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
+  const [inviteToken, setInviteToken] = useState("");
+  const [inviteOrganization, setInviteOrganization] = useState("");
+  const [inviteAccountExists, setInviteAccountExists] = useState(false);
+  const [inviteLoading, setInviteLoading] = useState(false);
+
+  useEffect(() => {
+    const urlToken = new URLSearchParams(window.location.search).get("invite");
+    if (urlToken) {
+      window.sessionStorage.setItem("pending_org_invitation_token", urlToken);
+    }
+    const invitationToken =
+      urlToken ?? window.sessionStorage.getItem("pending_org_invitation_token");
+    if (!invitationToken) return;
+    const resolvedInvitationToken = invitationToken;
+    window.history.replaceState({}, "", "/login");
+
+    async function loadInvitation() {
+      setInviteToken(resolvedInvitationToken);
+      setMode("login");
+      setInviteLoading(true);
+      try {
+        const invitation = await api.orgs.lookupInvitation(resolvedInvitationToken);
+        setEmail(invitation.email);
+        setInviteOrganization(invitation.organization_name);
+        setInviteAccountExists(invitation.account_exists);
+        setMode(invitation.account_exists ? "login" : "signup");
+        const { data: { session }, error: sessionError } = await createClient().auth.getSession();
+        if (sessionError) throw sessionError;
+        if (session?.user.email?.toLowerCase() === invitation.email.toLowerCase()) {
+          const result = await api.orgs.acceptInvitations(resolvedInvitationToken);
+          window.sessionStorage.removeItem("pending_org_invitation_token");
+          setActiveOrgId(result.items[0]?.org_id ?? null);
+          router.replace("/");
+          router.refresh();
+        }
+      } catch (lookupError) {
+        window.sessionStorage.removeItem("pending_org_invitation_token");
+        setError((lookupError as Error).message);
+      } finally {
+        setInviteLoading(false);
+      }
+    }
+
+    void Promise.resolve().then(loadInvitation);
+  }, [router]);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -21,23 +68,42 @@ export default function LoginPage() {
     setError("");
     setMessage("");
 
-    if (mode === "login") {
-      const { error } = await supabase.auth.signInWithPassword({ email, password });
-      if (error) {
-        setError(error.message);
-      } else {
+    try {
+      if (mode === "login") {
+        const { error } = await supabase.auth.signInWithPassword({ email, password });
+        if (error) throw error;
+        if (inviteToken) {
+          const result = await api.orgs.acceptInvitations(inviteToken);
+          window.sessionStorage.removeItem("pending_org_invitation_token");
+          setActiveOrgId(result.items[0]?.org_id ?? null);
+        }
         router.push("/");
         router.refresh();
-      }
-    } else {
-      const { error } = await supabase.auth.signUp({ email, password });
-      if (error) {
-        setError(error.message);
       } else {
-        setMessage("Check your email for a confirmation link.");
+        if (inviteToken) {
+          await api.orgs.createInvitedAccount(inviteToken, password);
+          const { error } = await supabase.auth.signInWithPassword({ email, password });
+          if (error) {
+            throw new Error(
+              "Your account was created, but sign-in did not complete. Choose Sign in and try again."
+            );
+          }
+          const result = await api.orgs.acceptInvitations(inviteToken);
+          window.sessionStorage.removeItem("pending_org_invitation_token");
+          setActiveOrgId(result.items[0]?.org_id ?? null);
+          router.push("/");
+          router.refresh();
+        } else {
+          const { error } = await supabase.auth.signUp({ email, password });
+          if (error) throw error;
+          setMessage("Check your email for a confirmation link.");
+        }
       }
+    } catch (submitError) {
+      setError((submitError as Error).message);
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   }
 
   return (
@@ -47,9 +113,9 @@ export default function LoginPage() {
         {/* Logo / wordmark */}
         <div className="text-center mb-8">
           <div className="inline-flex items-center gap-2 mb-3">
-            <span className="text-3xl">🎯</span>
+            <Target size={30} className="text-indigo-400" />
             <span className="text-2xl font-bold bg-gradient-to-r from-indigo-400 to-purple-400 bg-clip-text text-transparent">
-              LeadFlow
+              Missa
             </span>
           </div>
           <p className="text-slate-400 text-sm">AI-powered lead generation platform</p>
@@ -72,6 +138,18 @@ export default function LoginPage() {
           ))}
         </div>
 
+        {inviteToken && (
+          <p role="status" className="mb-5 rounded-lg border border-indigo-400/20 bg-indigo-400/10 px-3 py-2 text-sm text-indigo-200">
+            {inviteLoading
+              ? "Verifying invitation..."
+              : inviteOrganization
+                ? inviteAccountExists
+                  ? `You are invited to join ${inviteOrganization}. Sign in with the invited email address to accept.`
+                  : `You are invited to join ${inviteOrganization}. Create your account to accept; this invitation verifies your email.`
+                : "Complete sign in or account creation to accept this invitation."}
+          </p>
+        )}
+
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
             <label className="block text-sm text-slate-400 mb-1.5">Email</label>
@@ -80,6 +158,7 @@ export default function LoginPage() {
               required
               value={email}
               onChange={(e) => setEmail(e.target.value)}
+              readOnly={Boolean(inviteToken)}
               placeholder="you@example.com"
               className="w-full bg-white/5 border border-white/10 rounded-lg px-4 py-2.5 text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-500 transition"
             />
@@ -110,7 +189,7 @@ export default function LoginPage() {
 
           <button
             type="submit"
-            disabled={loading}
+            disabled={loading || inviteLoading || Boolean(inviteToken && error)}
             className="w-full py-2.5 bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 disabled:opacity-50 text-white font-semibold rounded-lg transition-all shadow-lg shadow-indigo-500/20 mt-2"
           >
             {loading ? "Please wait…" : mode === "login" ? "Sign in" : "Create account"}

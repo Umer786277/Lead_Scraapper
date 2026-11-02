@@ -59,6 +59,12 @@ _lock = threading.Lock()
 log = logging.getLogger("worker_runner")
 
 
+def _run_coordinated(job_id: str, callback):
+    from coordination import run_scheduled_job
+
+    return run_scheduled_job(job_id, callback)
+
+
 def start():
     global _scheduler, _state, _started
 
@@ -78,9 +84,11 @@ def start():
         db.init_db()
 
         from worker import (
-            job_enrich, job_send, job_inbox, job_scrape_rotation, job_calls,
+            job_enrich, job_send, job_inbox, job_scrape_rotation_all, job_calls,
+            job_booking_replies,
             _now_str, _write_state, _ensure_auto_campaign,
         )
+        from api.deletion_worker import process_deletion_jobs
 
         campaign_id, steps = _ensure_auto_campaign()
 
@@ -94,6 +102,7 @@ def start():
                 "inbox":    {},
                 "rotation": {},
                 "calls":    {},
+                "booking_replies": {},
             },
         })
         _write_state(_state)
@@ -104,29 +113,48 @@ def start():
         _scheduler = BackgroundScheduler(timezone="UTC")
 
         _scheduler.add_job(
-            lambda: job_enrich(_state, campaign_id, steps),
+            lambda: _run_coordinated(
+                "enrich", lambda: job_enrich(_state, campaign_id, steps)
+            ),
             "interval", minutes=5, id="enrich", max_instances=1,
             next_run_time=now_utc,
         )
         _scheduler.add_job(
-            lambda: job_send(_state),
+            lambda: _run_coordinated("send", lambda: job_send(_state)),
             "interval", minutes=5, id="send", max_instances=1,
             next_run_time=now_utc + timedelta(seconds=30),
         )
         _scheduler.add_job(
-            lambda: job_inbox(_state),
-            "interval", minutes=15, id="inbox", max_instances=1,
+            lambda: _run_coordinated("inbox", lambda: job_inbox(_state)),
+            "interval", minutes=2, id="inbox", max_instances=1,
             next_run_time=now_utc + timedelta(minutes=1),
         )
         _scheduler.add_job(
-            lambda: job_scrape_rotation(_state),
-            "interval", hours=1, id="rotation", max_instances=1,
+            lambda: _run_coordinated(
+                "rotation", lambda: job_scrape_rotation_all(_state)
+            ),
+            # 7-10 min (8.5 min base ± 90s jitter) — was hourly. Fine for local
+            # runs; if this ever runs on a resource-capped host again, or Google
+            # Maps starts throwing CAPTCHAs, dial this back up.
+            "interval", minutes=8.5, jitter=90, id="rotation", max_instances=1,
             next_run_time=now_utc + timedelta(minutes=5),
         )
         _scheduler.add_job(
-            lambda: job_calls(_state),
+            lambda: _run_coordinated("calls", lambda: job_calls(_state)),
             "interval", minutes=5, id="calls", max_instances=1,
             next_run_time=now_utc + timedelta(seconds=45),
+        )
+        _scheduler.add_job(
+            lambda: _run_coordinated(
+                "booking_replies", lambda: job_booking_replies(_state)
+            ),
+            "interval", minutes=5, id="booking_replies", max_instances=1,
+            next_run_time=now_utc + timedelta(minutes=2),
+        )
+        _scheduler.add_job(
+            process_deletion_jobs,
+            "interval", seconds=15, id="deletion_queue", max_instances=1,
+            next_run_time=now_utc,
         )
 
         _scheduler.start()

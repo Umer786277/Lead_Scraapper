@@ -8,19 +8,16 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Install supervisord to run Streamlit + worker in one container
-RUN pip install --no-cache-dir supervisor
-
 # Playwright browsers are pre-installed in the base image.
 # Run this only to make sure the version matches requirements.txt.
 RUN playwright install chromium
 
-# Copy app source
+# Copy API and worker source
 COPY . .
 
-# Streamlit binds to $PORT (set by Railway). Default 8501 for local Docker.
-ENV PORT=8501
+# FastAPI runs the background worker via api.worker_runner.
+ENV PORT=8000
 
 EXPOSE $PORT
 
-CMD ["supervisord", "-c", "supervisord.conf", "-n"]
+CMD ["sh", "-c", "uvicorn api.main:app --host 0.0.0.0 --port ${PORT}"]

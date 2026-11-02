@@ -1,6 +1,8 @@
 "use client";
 
 import { api, type Lead } from "@/lib/api";
+import ConfirmDialog from "@/components/ConfirmDialog";
+import { CheckCircle2, HelpCircle, Phone, XCircle } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 
 interface Call {
@@ -15,6 +17,12 @@ interface Call {
   qualified: string | null;
   notes: string | null;
   ended_reason: string | null;
+  reached_decision_maker: boolean | null;
+  pain_point: string | null;
+  pms_mentioned: string | null;
+  next_step: string | null;
+  next_step_time: string | null;
+  callback_requested: boolean | null;
   scheduled_at: string;
   initiated_at: string | null;
   ended_at: string | null;
@@ -39,6 +47,15 @@ const QUALIFIED_COLOR: Record<string, string> = {
   maybe: "text-yellow-400",
 };
 
+const NEXT_STEP_LABELS: Record<string, string> = {
+  demo_booked:        "Demo booked",
+  pilot_offered:       "Pilot offered",
+  follow_up_requested: "Follow-up requested",
+  declined:            "Declined",
+  gatekeeper_only:     "Reached gatekeeper only",
+  voicemail:           "Left voicemail",
+};
+
 export default function CallsPage() {
   const [calls, setCalls]       = useState<Call[]>([]);
   const [leads, setLeads]       = useState<Lead[]>([]);
@@ -47,7 +64,12 @@ export default function CallsPage() {
   const [loading, setLoading]   = useState(true);
   const [queueing, setQueueing] = useState(false);
   const [error, setError]       = useState("");
+  const [queueNotice, setQueueNotice] = useState<string | null>(null);
   const [selectedLeads, setSelectedLeads] = useState<Set<number>>(new Set());
+  const [countryFilter, setCountryFilter] = useState("all");
+  const [cityFilter, setCityFilter] = useState("all");
+  const [countries, setCountries] = useState<string[]>([]);
+  const [citiesForCountry, setCitiesForCountry] = useState<string[]>([]);
 
   const fetchCalls = useCallback(async () => {
     setLoading(true);
@@ -67,9 +89,34 @@ export default function CallsPage() {
   }, []);
 
   const fetchCallableLeads = useCallback(async () => {
-    const res = await api.leads.list({ bucket: "call", limit: "200" });
+    const params: Record<string, string> = { bucket: "call", limit: "200" };
+    if (countryFilter !== "all") params.country = countryFilter;
+    if (cityFilter !== "all") params.city = cityFilter;
+    const res = await api.leads.list(params);
     setLeads(res.items);
+  }, [countryFilter, cityFilter]);
+
+  useEffect(() => {
+    let active = true;
+    (async () => {
+      try {
+        const c = await api.leads.countries();
+        if (active) setCountries(c.countries);
+      } catch { /* non-fatal */ }
+    })();
+    return () => { active = false; };
   }, []);
+
+  useEffect(() => {
+    let active = true;
+    (async () => {
+      try {
+        const c = await api.leads.cities(countryFilter === "all" ? undefined : countryFilter);
+        if (active) setCitiesForCountry(c.cities);
+      } catch { /* non-fatal */ }
+    })();
+    return () => { active = false; };
+  }, [countryFilter]);
 
   useEffect(() => {
     fetchCalls();
@@ -83,7 +130,7 @@ export default function CallsPage() {
       const res = await api.calls.queue(Array.from(selectedLeads));
       setSelectedLeads(new Set());
       await fetchCalls();
-      alert(`Queued ${res.queued} call(s). Skipped ${res.skipped} (no phone).`);
+      setQueueNotice(`Queued ${res.queued} call(s). Skipped ${res.skipped} (no phone).`);
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -111,7 +158,9 @@ export default function CallsPage() {
     <div className="space-y-8">
       {/* Header */}
       <div>
-        <h1 className="text-2xl font-bold text-white">📞 Voice Calls</h1>
+        <h1 className="flex items-center gap-2 text-2xl font-bold text-white">
+          <Phone className="text-indigo-400" size={24} /> Voice Calls
+        </h1>
         <p className="text-slate-400 text-sm mt-1">
           AI-powered outbound qualification calls via Vapi.ai.
         </p>
@@ -145,13 +194,46 @@ export default function CallsPage() {
             disabled={!selectedLeads.size || queueing}
             className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-medium transition disabled:opacity-40"
           >
-            {queueing ? "Queueing…" : `📞 Queue ${selectedLeads.size} call${selectedLeads.size !== 1 ? "s" : ""}`}
+            {queueing ? "Queueing…" : (
+              <span className="flex items-center gap-1.5">
+                <Phone size={14} /> Queue {selectedLeads.size} call{selectedLeads.size !== 1 ? "s" : ""}
+              </span>
+            )}
           </button>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2">
+          <select
+            value={countryFilter}
+            onChange={(e) => {
+              setCountryFilter(e.target.value);
+              setCityFilter("all");
+              setSelectedLeads(new Set());
+            }}
+            className="bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-indigo-500/40"
+          >
+            <option value="all" className="bg-[#1a1d2e]">All countries</option>
+            {countries.map((c) => (
+              <option key={c} value={c} className="bg-[#1a1d2e]">{c}</option>
+            ))}
+          </select>
+          <select
+            value={cityFilter}
+            onChange={(e) => { setCityFilter(e.target.value); setSelectedLeads(new Set()); }}
+            className="bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-indigo-500/40"
+          >
+            <option value="all" className="bg-[#1a1d2e]">All cities</option>
+            {citiesForCountry.map((c) => (
+              <option key={c} value={c} className="bg-[#1a1d2e]">{c}</option>
+            ))}
+          </select>
         </div>
 
         <div className="max-h-56 overflow-y-auto rounded-xl border border-white/8 divide-y divide-white/5">
           {leads.length === 0 ? (
-            <p className="px-4 py-6 text-sm text-slate-500 text-center">No callable leads found. Run a scrape first.</p>
+            <p className="px-4 py-6 text-sm text-slate-500 text-center">
+              No callable leads{countryFilter !== "all" || cityFilter !== "all" ? " for the selected country/city" : ""}. Run a scrape first.
+            </p>
           ) : leads.map(lead => (
             <label key={lead.id} className="flex items-center gap-3 px-4 py-2.5 hover:bg-white/5 cursor-pointer">
               <input
@@ -229,8 +311,14 @@ export default function CallsPage() {
                     </td>
                     <td className="px-4 py-3 text-sm font-medium">
                       {call.qualified ? (
-                        <span className={QUALIFIED_COLOR[call.qualified] ?? "text-slate-400"}>
-                          {call.qualified === "yes" ? "✅ Yes" : call.qualified === "no" ? "❌ No" : "🤔 Maybe"}
+                        <span className={`flex items-center gap-1 ${QUALIFIED_COLOR[call.qualified] ?? "text-slate-400"}`}>
+                          {call.qualified === "yes" ? (
+                            <><CheckCircle2 size={14} /> Yes</>
+                          ) : call.qualified === "no" ? (
+                            <><XCircle size={14} /> No</>
+                          ) : (
+                            <><HelpCircle size={14} /> Maybe</>
+                          )}
                         </span>
                       ) : <span className="text-slate-600">—</span>}
                     </td>
@@ -265,12 +353,29 @@ export default function CallsPage() {
               <button onClick={() => setSelected(null)} className="text-slate-400 hover:text-white text-xl">×</button>
             </div>
 
+            {selected.next_step && (
+              <div className={`rounded-xl px-4 py-3 ${
+                ["demo_booked", "pilot_offered"].includes(selected.next_step)
+                  ? "bg-green-500/10 border border-green-500/20"
+                  : "bg-white/5"
+              }`}>
+                <p className="text-xs text-slate-500 mb-1">Next step</p>
+                <p className="text-sm font-medium text-white">
+                  {NEXT_STEP_LABELS[selected.next_step] ?? selected.next_step}
+                  {selected.next_step_time && ` — ${selected.next_step_time}`}
+                </p>
+              </div>
+            )}
+
             <div className="grid grid-cols-2 gap-3 text-sm">
               {[
                 ["Phone",    selected.phone],
                 ["Status",   selected.status],
                 ["Qualified",selected.qualified ?? "—"],
                 ["Duration", fmtDuration(selected.duration_sec)],
+                ["Decision-maker reached", selected.reached_decision_maker === null ? "—" : selected.reached_decision_maker ? "Yes" : "No"],
+                ["Callback requested",     selected.callback_requested === null ? "—" : selected.callback_requested ? "Yes" : "No"],
+                ["PMS mentioned", selected.pms_mentioned || "—"],
                 ["Ended reason", selected.ended_reason ?? "—"],
                 ["Vapi ID",  selected.vapi_call_id ?? "—"],
               ].map(([k, v]) => (
@@ -280,6 +385,13 @@ export default function CallsPage() {
                 </div>
               ))}
             </div>
+
+            {selected.pain_point && (
+              <div className="bg-yellow-400/5 border border-yellow-400/20 rounded-xl px-4 py-3">
+                <p className="text-xs text-slate-500 mb-1">Pain point surfaced</p>
+                <p className="text-sm text-slate-200">{selected.pain_point}</p>
+              </div>
+            )}
 
             {selected.summary && (
               <div className="bg-white/5 rounded-xl px-4 py-3">
@@ -313,6 +425,17 @@ export default function CallsPage() {
           </div>
         </div>
       )}
+      <ConfirmDialog
+        open={queueNotice !== null}
+        title="Calls added to queue"
+        description={queueNotice ?? ""}
+        confirmLabel="Got it"
+        tone="primary"
+        showCancel={false}
+        onConfirm={async () => undefined}
+        onError={(noticeError) => setError(noticeError instanceof Error ? noticeError.message : "Unable to dismiss the notification.")}
+        onClose={() => setQueueNotice(null)}
+      />
     </div>
   );
 }
