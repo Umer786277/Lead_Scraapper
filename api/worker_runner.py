@@ -86,16 +86,14 @@ def start():
         from worker import (
             job_enrich, job_send, job_inbox, job_scrape_rotation_all, job_calls,
             job_booking_replies,
-            _now_str, _write_state, _ensure_auto_campaign,
+            _now_str, _write_state,
         )
         from api.deletion_worker import process_deletion_jobs
-
-        campaign_id, steps = _ensure_auto_campaign()
 
         _state.update({
             "pid":              os.getpid(),
             "started_at":       _now_str(),
-            "auto_campaign_id": campaign_id,
+            "auto_campaign_id": None,
             "jobs": {
                 "enrich":   {},
                 "send":     {},
@@ -113,9 +111,7 @@ def start():
         _scheduler = BackgroundScheduler(timezone="UTC")
 
         _scheduler.add_job(
-            lambda: _run_coordinated(
-                "enrich", lambda: job_enrich(_state, campaign_id, steps)
-            ),
+            lambda: _run_coordinated("enrich", lambda: job_enrich(_state)),
             "interval", minutes=5, id="enrich", max_instances=1,
             next_run_time=now_utc,
         )

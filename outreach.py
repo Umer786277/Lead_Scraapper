@@ -376,15 +376,7 @@ def send_now(smtp=None, from_addr=None, lead_ids=(), template_id=None, dry_run=F
 
     tmpl = db.get_template(template_id, org_id=org_id) if template_id else None
     if not tmpl:
-        templates = db.list_templates(org_id=org_id)
-        tmpl = next(
-            (t for t in templates
-             if "step 1" in (t.get("name") or "").lower()
-             and "intro" in (t.get("name") or "").lower()),
-            None,
-        ) or (templates[0] if templates else None)
-    if not tmpl:
-        summary["error"] = "No email template available - create one first."
+        summary["error"] = "Select a valid email script before sending."
         return summary
 
     if not dry_run and not (smtp and smtp.host) \
@@ -426,7 +418,7 @@ def send_now(smtp=None, from_addr=None, lead_ids=(), template_id=None, dry_run=F
                 reply_to=reply_to,
                 next_attempt_at=_jittered_next_attempt_at(jitter_max),
                 idempotency_key=f"send-now:{uuid.uuid4()}",
-                note="manual send-now",
+                note=f"Manual send: {tmpl['name']}",
             )
             summary["queued"] += 1
         except Exception as e:
@@ -595,7 +587,13 @@ def enqueue_due_sends(limit=50, dry_run=False, on_item=None, org_id=None, smtp=N
             body=item["body"],
             next_attempt_at=_jittered_next_attempt_at(jitter_max),
             idempotency_key=f"campaign:{item['send_id']}",
-            note=f"step {item['step_number']}",
+            note=(
+                f"step {item['step_number']}"
+                + (
+                    f" · script {item['script_name']}"
+                    if item.get("script_name") else ""
+                )
+            ),
         )
         db.mark_send(
             item["send_id"],
@@ -1007,6 +1005,7 @@ def process_queue(smtp=None, from_addr=None, limit=50, dry_run=False, on_item=No
 
 DEFAULT_TEMPLATES = [
     {
+        "step_number": 1,
         "name":    "Step 1 — Intro",
         "subject": "Missed calls at {{business_name}}?",
         "body":    (
@@ -1028,6 +1027,7 @@ DEFAULT_TEMPLATES = [
         ),
     },
     {
+        "step_number": 2,
         "name":    "Step 2 — Bump",
         "subject": "One more for {{business_name}}",
         "body":    (
@@ -1042,6 +1042,7 @@ DEFAULT_TEMPLATES = [
         ),
     },
     {
+        "step_number": 3,
         "name":    "Step 3 — Value",
         "subject": "The number most clinics don't track",
         "body":    (
@@ -1060,6 +1061,7 @@ DEFAULT_TEMPLATES = [
         ),
     },
     {
+        "step_number": 4,
         "name":    "Step 4 — Break-up",
         "subject": "Closing the loop",
         "body":    (
@@ -1095,11 +1097,30 @@ def booking_reply_body(lead, booking_link):
 
 
 def seed_default_templates(org_id=None):
-    """Insert the 4 starter templates for an org if it has none yet."""
-    existing = db.list_templates(org_id=org_id)
-    if existing:
-        return [t["id"] for t in existing[:4]]
-    ids = []
+    """Ensure every organization has a template for each of its four steps."""
+    existing = {
+        t.get("step_number"): t
+        for t in db.list_templates(org_id=org_id)
+        if t.get("step_number") in range(1, 5)
+    }
     for t in DEFAULT_TEMPLATES:
-        ids.append(db.upsert_template(t["name"], t["subject"], t["body"], org_id=org_id))
-    return ids
+        if t["step_number"] not in existing:
+            try:
+                template_id = db.upsert_template(
+                    t["name"],
+                    t["subject"],
+                    t["body"],
+                    org_id=org_id,
+                    step_number=t["step_number"],
+                )
+            except db.pg_errors.UniqueViolation:
+                existing = {
+                    template.get("step_number"): template
+                    for template in db.list_templates(org_id=org_id)
+                    if template.get("step_number") in range(1, 5)
+                }
+                if t["step_number"] not in existing:
+                    raise
+                template_id = existing[t["step_number"]]["id"]
+            existing[t["step_number"]] = {"id": template_id}
+    return [existing[number]["id"] for number in range(1, 5)]

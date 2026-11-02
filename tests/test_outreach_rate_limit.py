@@ -341,7 +341,12 @@ class OutreachRateLimitTests(unittest.TestCase):
         )
 
     def test_send_now_only_enqueues(self):
-        template = {"id": 1, "subject": "Hi {{business_name}}", "body": "Hello"}
+        template = {
+            "id": 1,
+            "name": "Intro",
+            "subject": "Hi {{business_name}}",
+            "body": "Hello",
+        }
         lead = {"id": 23, "email": "recipient@example.com", "status": "new",
                 "business_name": "Clinic"}
         with patch.object(db, "is_outreach_paused", return_value=False), \
@@ -349,7 +354,7 @@ class OutreachRateLimitTests(unittest.TestCase):
                              return_value={"pause_active": False, "paused_until": None}), \
                 patch.object(db, "get_send_jitter_max_seconds", return_value=0), \
                 patch.object(db, "get_template", return_value=template), \
-                patch.object(db, "list_templates", return_value=[template]) as list_templates, \
+                patch.object(db, "list_templates") as list_templates, \
                 patch.object(db, "get_lead", return_value=lead), \
                 patch.object(db, "enqueue_outbound",
                              return_value={"id": 1, "created": True, "status": "pending"}) as enqueue, \
@@ -360,6 +365,7 @@ class OutreachRateLimitTests(unittest.TestCase):
                 smtp=Mock(host="smtp.example.com"),
                 from_addr="sender@example.com",
                 lead_ids=[23],
+                template_id=1,
                 org_id="org-id",
             )
 
@@ -370,8 +376,22 @@ class OutreachRateLimitTests(unittest.TestCase):
         self.assertEqual(enqueue.call_args.kwargs["body"], template["body"])
         ensure_opener.assert_not_called()
         send_email.assert_not_called()
-        list_templates.assert_called_once_with(org_id="org-id")
+        list_templates.assert_not_called()
         sleep.assert_not_called()
+
+    def test_send_now_requires_a_selected_template(self):
+        with patch.object(db, "is_outreach_paused", return_value=False), \
+                patch.object(db, "outreach_dispatch_status",
+                             return_value={"pause_active": False, "paused_until": None}), \
+                patch.object(db, "get_send_jitter_max_seconds", return_value=0), \
+                patch.object(db, "get_template") as get_template:
+            summary = outreach.send_now(
+                lead_ids=[23],
+                org_id="org-id",
+            )
+
+        self.assertEqual(summary["error"], "Select a valid email script before sending.")
+        get_template.assert_not_called()
 
     def test_campaign_enqueue_does_not_run_opener_generation(self):
         scheduled_item = {
@@ -437,7 +457,7 @@ class OutreachRateLimitTests(unittest.TestCase):
         from api.routers import outreach as outreach_api
 
         smtp = Mock(host="smtp.example.com", username="sender@example.com")
-        body = outreach_api.SendNowBody(lead_ids=[23])
+        body = outreach_api.SendNowBody(lead_ids=[23], template_id=1)
         with patch.object(outreach.SMTPConfig, "from_env", return_value=smtp), \
                 patch.object(outreach, "send_now",
                              return_value={"queued": 1, "sent": 0}) as queue_send, \
@@ -447,6 +467,7 @@ class OutreachRateLimitTests(unittest.TestCase):
         self.assertEqual(result, {"queued": 1, "sent": 0})
         queue_send.assert_called_once()
         self.assertEqual(queue_send.call_args.args[2], [23])
+        self.assertEqual(queue_send.call_args.kwargs["template_id"], 1)
         send_email.assert_not_called()
 
     def test_send_draft_endpoint_only_enqueues(self):

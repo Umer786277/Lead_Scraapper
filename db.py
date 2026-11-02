@@ -220,6 +220,7 @@ CREATE TABLE IF NOT EXISTS leads (
 CREATE TABLE IF NOT EXISTS email_templates (
     id          SERIAL PRIMARY KEY,
     org_id      {_ORG_DEFAULT},
+    step_number SMALLINT,
     name        TEXT NOT NULL,
     subject     TEXT NOT NULL,
     body        TEXT NOT NULL,
@@ -227,9 +228,26 @@ CREATE TABLE IF NOT EXISTS email_templates (
     updated_at  TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS outreach_sequences (
+    id          SERIAL PRIMARY KEY,
+    org_id      {_ORG_DEFAULT},
+    name        TEXT NOT NULL,
+    created_at  TEXT NOT NULL,
+    updated_at  TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS outreach_sequence_steps (
+    sequence_id INTEGER NOT NULL REFERENCES outreach_sequences(id) ON DELETE CASCADE,
+    step_number SMALLINT NOT NULL CHECK (step_number BETWEEN 1 AND 4),
+    delay_days  INTEGER NOT NULL CHECK (delay_days BETWEEN 0 AND 365),
+    template_id INTEGER NOT NULL REFERENCES email_templates(id),
+    PRIMARY KEY (sequence_id, step_number)
+);
+
 CREATE TABLE IF NOT EXISTS campaigns (
     id           SERIAL PRIMARY KEY,
     org_id       {_ORG_DEFAULT},
+    sequence_id  INTEGER REFERENCES outreach_sequences(id) ON DELETE SET NULL,
     name         TEXT NOT NULL,
     status       TEXT NOT NULL DEFAULT 'active',
     leads_count  INTEGER DEFAULT 0,
@@ -242,7 +260,10 @@ CREATE TABLE IF NOT EXISTS campaign_steps (
     campaign_id   INTEGER NOT NULL REFERENCES campaigns(id),
     step_number   INTEGER NOT NULL,
     delay_days    INTEGER NOT NULL,
-    template_id   INTEGER NOT NULL REFERENCES email_templates(id)
+    template_id   INTEGER NOT NULL REFERENCES email_templates(id),
+    template_name TEXT,
+    subject       TEXT,
+    body          TEXT
 );
 
 CREATE TABLE IF NOT EXISTS scheduled_sends (
@@ -641,7 +662,107 @@ _MIGRATIONS = [
     f"ALTER TABLE emails           ADD COLUMN IF NOT EXISTS org_id {_ORG_DEFAULT}",
     f"ALTER TABLE leads            ADD COLUMN IF NOT EXISTS org_id {_ORG_DEFAULT}",
     f"ALTER TABLE email_templates  ADD COLUMN IF NOT EXISTS org_id {_ORG_DEFAULT}",
+    "ALTER TABLE email_templates ADD COLUMN IF NOT EXISTS step_number SMALLINT",
+    "DO $$ BEGIN "
+    "IF NOT EXISTS (SELECT 1 FROM pg_constraint "
+    "WHERE conrelid='email_templates'::regclass "
+    "AND conname='email_templates_step_number_check') THEN "
+    "ALTER TABLE email_templates ADD CONSTRAINT email_templates_step_number_check "
+    "CHECK (step_number IS NULL OR step_number BETWEEN 1 AND 4); "
+    "END IF; END $$",
+    "WITH named_templates AS ("
+    "  SELECT id, org_id, "
+    "         (regexp_match(name, '^Step[[:space:]]+([1-4])([^0-9]|$)', 'i'))[1]::smallint "
+    "           AS step_number, "
+    "         row_number() OVER ("
+    "           PARTITION BY org_id, "
+    "             (regexp_match(name, '^Step[[:space:]]+([1-4])([^0-9]|$)', 'i'))[1] "
+    "           ORDER BY id"
+    "         ) AS position "
+    "  FROM email_templates "
+    "  WHERE name ~* '^Step[[:space:]]+[1-4]([^0-9]|$)'"
+    ") "
+    "UPDATE email_templates t SET step_number=n.step_number "
+    "FROM named_templates n "
+    "WHERE t.id=n.id AND t.step_number IS NULL AND n.position=1 "
+    "  AND NOT EXISTS ("
+    "    SELECT 1 FROM email_templates occupied "
+    "    WHERE occupied.org_id=t.org_id "
+    "      AND occupied.step_number=n.step_number"
+    "  )",
     f"ALTER TABLE campaigns        ADD COLUMN IF NOT EXISTS org_id {_ORG_DEFAULT}",
+    "WITH campaign_templates AS ("
+    "  SELECT t.id, t.org_id, cs.step_number, "
+    "         row_number() OVER ("
+    "           PARTITION BY t.org_id, cs.step_number ORDER BY t.id"
+    "         ) AS position "
+    "  FROM email_templates t "
+    "  JOIN campaign_steps cs ON cs.template_id=t.id "
+    "  JOIN campaigns c ON c.id=cs.campaign_id AND c.org_id=t.org_id "
+    "  WHERE c.name='Auto Outreach' AND cs.step_number BETWEEN 1 AND 4 "
+    "    AND t.step_number IS NULL "
+    "    AND NOT EXISTS ("
+    "      SELECT 1 FROM email_templates occupied "
+    "      WHERE occupied.org_id=t.org_id "
+    "        AND occupied.step_number=cs.step_number"
+    "    )"
+    ") "
+    "UPDATE email_templates t SET step_number=ct.step_number "
+    "FROM campaign_templates ct "
+    "WHERE t.id=ct.id AND ct.position=1 AND t.step_number IS NULL "
+    "  AND NOT EXISTS ("
+    "    SELECT 1 FROM email_templates occupied "
+    "    WHERE occupied.org_id=t.org_id "
+    "      AND occupied.step_number=ct.step_number"
+    "  )",
+    "CREATE UNIQUE INDEX IF NOT EXISTS uq_email_templates_org_step "
+    "ON email_templates(org_id, step_number) WHERE step_number IS NOT NULL",
+    "CREATE TABLE IF NOT EXISTS outreach_sequences ("
+    f"id SERIAL PRIMARY KEY, org_id {_ORG_DEFAULT}, name TEXT NOT NULL, "
+    "created_at TEXT NOT NULL, updated_at TEXT NOT NULL)",
+    "CREATE TABLE IF NOT EXISTS outreach_sequence_steps ("
+    "sequence_id INTEGER NOT NULL REFERENCES outreach_sequences(id) ON DELETE CASCADE, "
+    "step_number SMALLINT NOT NULL CHECK (step_number BETWEEN 1 AND 4), "
+    "delay_days INTEGER NOT NULL CHECK (delay_days BETWEEN 0 AND 365), "
+    "template_id INTEGER NOT NULL REFERENCES email_templates(id), "
+    "PRIMARY KEY (sequence_id, step_number))",
+    "ALTER TABLE campaigns ADD COLUMN IF NOT EXISTS sequence_id "
+    "INTEGER REFERENCES outreach_sequences(id) ON DELETE SET NULL",
+    "CREATE TABLE IF NOT EXISTS outreach_script_sets ("
+    "id SERIAL PRIMARY KEY, "
+    f"org_id {_ORG_DEFAULT}, "
+    "name TEXT NOT NULL, "
+    "script_mode TEXT NOT NULL CHECK (script_mode IN ('sequential', 'random')), "
+    "scripts JSONB NOT NULL, "
+    "created_at TEXT NOT NULL, "
+    "updated_at TEXT NOT NULL)",
+    "CREATE INDEX IF NOT EXISTS idx_script_sets_org "
+    "ON outreach_script_sets(org_id, id)",
+    "ALTER TABLE campaigns ADD COLUMN IF NOT EXISTS script_set_id "
+    "INTEGER REFERENCES outreach_script_sets(id) ON DELETE SET NULL",
+    "ALTER TABLE campaigns ADD COLUMN IF NOT EXISTS script_mode TEXT",
+    "ALTER TABLE campaigns ADD COLUMN IF NOT EXISTS script_variants "
+    "JSONB NOT NULL DEFAULT '[]'::jsonb",
+    "ALTER TABLE campaigns ADD COLUMN IF NOT EXISTS script_rotation_index "
+    "INTEGER NOT NULL DEFAULT 0",
+    "ALTER TABLE campaigns ADD COLUMN IF NOT EXISTS script_rotation_order "
+    "JSONB NOT NULL DEFAULT '[]'::jsonb",
+    "CREATE TABLE IF NOT EXISTS campaign_script_assignments ("
+    "campaign_id INTEGER NOT NULL REFERENCES campaigns(id) ON DELETE CASCADE, "
+    "lead_id INTEGER NOT NULL REFERENCES leads(id) ON DELETE CASCADE, "
+    "script_name TEXT NOT NULL, "
+    "script_snapshot JSONB NOT NULL, "
+    "assigned_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP, "
+    "PRIMARY KEY (campaign_id, lead_id))",
+    "ALTER TABLE scheduled_sends ADD COLUMN IF NOT EXISTS script_name TEXT",
+    "ALTER TABLE campaign_steps ADD COLUMN IF NOT EXISTS template_name TEXT",
+    "ALTER TABLE campaign_steps ADD COLUMN IF NOT EXISTS subject TEXT",
+    "ALTER TABLE campaign_steps ADD COLUMN IF NOT EXISTS body TEXT",
+    "UPDATE campaign_steps cs SET template_name=t.name, subject=t.subject, body=t.body "
+    "FROM email_templates t, campaigns c "
+    "WHERE t.id=cs.template_id AND c.id=cs.campaign_id "
+    "AND c.name<>'Auto Outreach' AND cs.template_name IS NULL "
+    "AND cs.subject IS NULL AND cs.body IS NULL",
     f"ALTER TABLE scheduled_sends  ADD COLUMN IF NOT EXISTS org_id {_ORG_DEFAULT}",
     f"ALTER TABLE email_events     ADD COLUMN IF NOT EXISTS org_id {_ORG_DEFAULT}",
     f"ALTER TABLE vendor_threads   ADD COLUMN IF NOT EXISTS org_id {_ORG_DEFAULT}",
@@ -660,6 +781,11 @@ _MIGRATIONS = [
     "IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid='outreach_settings'::regclass AND contype='p') "
     "THEN ALTER TABLE outreach_settings ADD PRIMARY KEY (org_id, key); END IF; "
     "END $$",
+    "INSERT INTO outreach_settings (org_id, key, value) "
+    "SELECT DISTINCT ON (org_id) org_id, "
+    "'campaign_script_selection_mode', script_mode "
+    "FROM outreach_script_sets ORDER BY org_id, id DESC "
+    "ON CONFLICT (org_id, key) DO NOTHING",
     "ALTER TABLE emails DROP CONSTRAINT IF EXISTS emails_domain_email_key",
     "ALTER TABLE scrape_queries DROP CONSTRAINT IF EXISTS scrape_queries_niche_city_country_key",
     "CREATE UNIQUE INDEX IF NOT EXISTS uq_emails_org_domain_email ON emails(org_id, domain, email)",
@@ -1828,21 +1954,65 @@ def emails_by_day(days=14, org_id=None):
 
 
 # ── Templates ────────────────────────────────────────────────
-def upsert_template(name, subject, body, template_id=None, org_id=None):
+def upsert_template(
+    name,
+    subject,
+    body,
+    template_id=None,
+    org_id=None,
+    step_number=None,
+):
     ts = now()
     org = org_id_or_default(org_id)
     with get_conn() as c:
         if template_id:
+            current = c.execute(
+                "SELECT id, step_number FROM email_templates "
+                "WHERE id=%s AND org_id=%s FOR UPDATE",
+                (template_id, org),
+            ).fetchone()
+            if current and step_number is not None:
+                occupied = c.execute(
+                    "SELECT id FROM email_templates "
+                    "WHERE org_id=%s AND step_number=%s AND id<>%s FOR UPDATE",
+                    (org, step_number, template_id),
+                ).fetchone()
+                if occupied:
+                    if current["step_number"] is None:
+                        raise ValueError(
+                            f"Step {step_number} is already assigned to another template."
+                        )
+                    c.execute(
+                        "UPDATE email_templates SET step_number=NULL WHERE id=%s",
+                        (template_id,),
+                    )
+                    c.execute(
+                        "UPDATE email_templates SET step_number=%s WHERE id=%s",
+                        (current["step_number"], occupied["id"]),
+                    )
             c.execute(
-                "UPDATE email_templates SET name=%s, subject=%s, body=%s, updated_at=%s "
+                "UPDATE email_templates SET name=%s, subject=%s, body=%s, "
+                "step_number=COALESCE(%s, step_number), updated_at=%s "
                 "WHERE id=%s AND org_id=%s",
-                (name, subject, body, ts, template_id, org),
+                (name, subject, body, step_number, ts, template_id, org),
+            )
+            c.execute(
+                "UPDATE campaign_steps cs SET template_id=t.id "
+                "FROM campaigns campaign, email_templates t "
+                "WHERE cs.campaign_id=campaign.id "
+                "  AND campaign.name='Auto Outreach' "
+                "  AND campaign.org_id=%s "
+                "  AND t.org_id=campaign.org_id "
+                "  AND t.step_number=cs.step_number "
+                "  AND cs.step_number BETWEEN 1 AND 4",
+                (org,),
             )
             return template_id
         cur = c.execute(
-            "INSERT INTO email_templates (org_id, name, subject, body, created_at, updated_at) "
-            "VALUES (%s, %s, %s, %s, %s, %s) RETURNING id",
-            (org, name, subject, body, ts, ts),
+            "INSERT INTO email_templates "
+            "(org_id, step_number, name, subject, body, created_at, updated_at) "
+            "VALUES (%s, %s, %s, %s, %s, %s, %s) RETURNING id",
+            (org, step_number, name, subject, body, ts, ts),
         )
         return cur.fetchone()["id"]
 
@@ -1851,7 +2021,8 @@ def list_templates(org_id=None):
     clause, args = _scope(org_id, "org_id")
     with get_conn() as c:
         return [dict(r) for r in c.execute(
-            f"SELECT * FROM email_templates WHERE 1=1{clause} ORDER BY updated_at DESC",
+            f"SELECT * FROM email_templates WHERE 1=1{clause} "
+            "ORDER BY step_number NULLS LAST, updated_at DESC",
             tuple(args),
         ).fetchall()]
 
@@ -1869,6 +2040,116 @@ def delete_template(template_id, org_id=None):
     clause, args = _scope(org_id, "org_id")
     with get_conn() as c:
         c.execute(f"DELETE FROM email_templates WHERE id=%s{clause}", (template_id, *args))
+
+
+def list_sequences(org_id=None):
+    clause, args = _scope(org_id, "s.org_id")
+    with get_conn() as c:
+        rows = c.execute(
+            "SELECT s.id, s.name, s.created_at, s.updated_at, "
+            "ss.step_number, ss.delay_days, ss.template_id, t.name AS template_name, "
+            "t.subject "
+            "FROM outreach_sequences s "
+            "LEFT JOIN outreach_sequence_steps ss ON ss.sequence_id=s.id "
+            "LEFT JOIN email_templates t ON t.id=ss.template_id "
+            f"WHERE 1=1{clause} ORDER BY s.id, ss.step_number",
+            tuple(args),
+        ).fetchall()
+    sequences = {}
+    for row in rows:
+        sequence = sequences.setdefault(
+            row["id"],
+            {
+                "id": row["id"],
+                "name": row["name"],
+                "created_at": row["created_at"],
+                "updated_at": row["updated_at"],
+                "steps": [],
+            },
+        )
+        if row["step_number"] is not None:
+            sequence["steps"].append({
+                "step_number": row["step_number"],
+                "delay_days": row["delay_days"],
+                "template_id": row["template_id"],
+                "template_name": row["template_name"],
+                "subject": row["subject"],
+            })
+    return list(sequences.values())
+
+
+def get_sequence(sequence_id, org_id=None):
+    return next(
+        (sequence for sequence in list_sequences(org_id)
+         if sequence["id"] == sequence_id),
+        None,
+    )
+
+
+def upsert_sequence(name, steps, sequence_id=None, org_id=None):
+    if not name or not name.strip():
+        raise ValueError("Sequence name cannot be blank.")
+    if not steps or len(steps) > 4:
+        raise ValueError("A sequence must contain between 1 and 4 steps.")
+    if steps[0]["delay_days"] != 0:
+        raise ValueError("The initial email must have a delay of 0 days.")
+    org = org_id_or_default(org_id)
+    ts = now()
+    with get_conn() as c:
+        if sequence_id is not None:
+            current = c.execute(
+                "SELECT id FROM outreach_sequences WHERE id=%s AND org_id=%s FOR UPDATE",
+                (sequence_id, org),
+            ).fetchone()
+            if not current:
+                raise ValueError("Sequence not found.")
+            c.execute(
+                "UPDATE outreach_sequences SET name=%s, updated_at=%s WHERE id=%s",
+                (name, ts, sequence_id),
+            )
+            c.execute(
+                "DELETE FROM outreach_sequence_steps WHERE sequence_id=%s",
+                (sequence_id,),
+            )
+        else:
+            sequence_id = c.execute(
+                "INSERT INTO outreach_sequences (org_id, name, created_at, updated_at) "
+                "VALUES (%s, %s, %s, %s) RETURNING id",
+                (org, name, ts, ts),
+            ).fetchone()["id"]
+
+        seen_template_ids = set()
+        for number, step in enumerate(steps, 1):
+            template_id = step["template_id"]
+            if template_id in seen_template_ids:
+                raise ValueError("A sequence cannot use the same template more than once.")
+            seen_template_ids.add(template_id)
+            template = c.execute(
+                "SELECT id FROM email_templates WHERE id=%s AND org_id=%s",
+                (template_id, org),
+            ).fetchone()
+            if not template:
+                raise ValueError("A selected email script does not exist in this organization.")
+            delay_days = step["delay_days"]
+            if not isinstance(delay_days, int) or not 0 <= delay_days <= 365:
+                raise ValueError("Step delays must be between 0 and 365 days.")
+            c.execute(
+                "INSERT INTO outreach_sequence_steps "
+                "(sequence_id, step_number, delay_days, template_id) "
+                "VALUES (%s, %s, %s, %s)",
+                (sequence_id, number, delay_days, template_id),
+            )
+        return sequence_id
+
+
+def delete_sequence(sequence_id, org_id=None):
+    clause, args = _scope(org_id, "org_id")
+    with get_conn() as c:
+        cur = c.execute(
+            f"DELETE FROM outreach_sequences WHERE id=%s{clause}",
+            (sequence_id, *args),
+        )
+        return cur.rowcount > 0
 
 
 # ── Leads (for selection) ────────────────────────────────────
@@ -1911,15 +2192,340 @@ def update_lead_status(lead_id, status, note=None, org_id=None):
             )
 
 
+def _validated_script_variants(scripts):
+    if not isinstance(scripts, list) or not 1 <= len(scripts) <= 5:
+        raise ValueError("A script set must contain between 1 and 5 variants.")
+
+    normalized = []
+    expected_steps = None
+    for variant in scripts:
+        if not isinstance(variant, dict):
+            raise ValueError("Each script variant must be an object.")
+        raw_name = variant.get("name")
+        name = raw_name.strip() if isinstance(raw_name, str) else ""
+        steps = variant.get("steps")
+        if not name or not isinstance(steps, list) or not 1 <= len(steps) <= 4:
+            raise ValueError("Each script needs a name and between 1 and 4 steps.")
+        if expected_steps is None:
+            expected_steps = len(steps)
+        elif len(steps) != expected_steps:
+            raise ValueError("Every script variant must have the same number of steps.")
+
+        normalized_steps = []
+        for step in steps:
+            if not isinstance(step, dict):
+                raise ValueError("Each script step must be an object.")
+            raw_subject = step.get("subject")
+            raw_body = step.get("body")
+            subject = raw_subject.strip() if isinstance(raw_subject, str) else ""
+            body = raw_body.strip() if isinstance(raw_body, str) else ""
+            if not subject or not body:
+                raise ValueError("Every script step needs a subject and body.")
+            normalized_steps.append({"subject": subject, "body": body})
+        normalized.append({"name": name, "steps": normalized_steps})
+
+    return normalized
+
+
+def _jsonb_value(value):
+    if isinstance(value, str):
+        return json.loads(value)
+    return value
+
+
+def create_script_set(name, scripts, org_id=None):
+    name = (name or "").strip()
+    if not name:
+        raise ValueError("Script set name cannot be blank.")
+    scripts = _validated_script_variants(scripts)
+    with get_conn() as c:
+        row = c.execute(
+            "INSERT INTO outreach_script_sets "
+            "(org_id, name, script_mode, scripts, created_at, updated_at) "
+            "VALUES (%s, %s, %s, %s::jsonb, %s, %s) RETURNING id",
+            (
+                org_id_or_default(org_id), name, "sequential", json.dumps(scripts),
+                now(), now(),
+            ),
+        ).fetchone()
+        return row["id"]
+
+
+def get_script_set(script_set_id, org_id=None):
+    clause, args = _scope(org_id, "org_id")
+    with get_conn() as c:
+        row = c.execute(
+            f"SELECT * FROM outreach_script_sets WHERE id=%s{clause}",
+            (script_set_id, *args),
+        ).fetchone()
+    if not row:
+        return None
+    result = dict(row)
+    result["scripts"] = _jsonb_value(result["scripts"])
+    return result
+
+
+def list_script_sets(org_id=None):
+    clause, args = _scope(org_id, "org_id")
+    with get_conn() as c:
+        rows = c.execute(
+            "SELECT id, name, scripts, created_at, updated_at "
+            f"FROM outreach_script_sets WHERE 1=1{clause} ORDER BY id DESC",
+            tuple(args),
+        ).fetchall()
+    result = []
+    for row in rows:
+        item = dict(row)
+        item["scripts"] = _jsonb_value(item["scripts"])
+        result.append(item)
+    return result
+
+
+def update_script_set(script_set_id, name, scripts, org_id=None):
+    name = (name or "").strip()
+    if not name:
+        raise ValueError("Script set name cannot be blank.")
+    scripts = _validated_script_variants(scripts)
+    org = org_id_or_default(org_id)
+
+    with get_conn() as c:
+        script_set = c.execute(
+            "SELECT id FROM outreach_script_sets WHERE id=%s AND org_id=%s "
+            "FOR UPDATE",
+            (script_set_id, org),
+        ).fetchone()
+        if not script_set:
+            return False
+
+        campaigns = c.execute(
+            "SELECT c.id, "
+            "(SELECT COUNT(*) FROM campaign_steps cs "
+            " WHERE cs.campaign_id=c.id) AS step_count "
+            "FROM campaigns c WHERE c.script_set_id=%s AND c.org_id=%s "
+            "FOR UPDATE OF c",
+            (script_set_id, org),
+        ).fetchall()
+        for campaign in campaigns:
+            if campaign["step_count"] != len(scripts[0]["steps"]):
+                raise ValueError(
+                    "Script variants must keep the same number of steps as "
+                    "every campaign using this set."
+                )
+
+        c.execute(
+            "UPDATE outreach_script_sets SET name=%s, scripts=%s::jsonb, "
+            "updated_at=%s WHERE id=%s AND org_id=%s",
+            (name, json.dumps(scripts), now(), script_set_id, org),
+        )
+        for campaign in campaigns:
+            c.execute(
+                "UPDATE campaigns SET script_variants=%s::jsonb, "
+                "script_rotation_index=0, script_rotation_order='[]'::jsonb "
+                "WHERE id=%s AND org_id=%s",
+                (
+                    json.dumps(scripts),
+                    campaign["id"], org,
+                ),
+            )
+    return True
+
+
+def get_script_selection_mode(org_id=None):
+    mode = get_setting(
+        "campaign_script_selection_mode", "sequential", org_id=org_id,
+    )
+    if mode not in ("sequential", "random"):
+        raise RuntimeError(
+            f"Invalid organization script selection mode: {mode!r}"
+        )
+    return mode
+
+
+def set_script_selection_mode(mode, org_id=None):
+    if mode not in ("sequential", "random"):
+        raise ValueError("Script selection mode must be sequential or random.")
+    org = org_id_or_default(org_id)
+    with get_conn() as c:
+        changed = c.execute(
+            "INSERT INTO outreach_settings (org_id, key, value) "
+            "VALUES (%s, %s, %s) "
+            "ON CONFLICT (org_id, key) DO UPDATE "
+            "SET value=EXCLUDED.value "
+            "WHERE outreach_settings.value IS DISTINCT FROM EXCLUDED.value "
+            "RETURNING value",
+            (org, "campaign_script_selection_mode", mode),
+        ).fetchone()
+        if changed:
+            c.execute(
+                "UPDATE campaigns SET script_rotation_index=0, "
+                "script_rotation_order='[]'::jsonb "
+                "WHERE org_id=%s AND jsonb_array_length(script_variants)>0",
+                (org,),
+            )
+
+
+def delete_script_set(script_set_id, org_id=None):
+    clause, args = _scope(org_id, "org_id")
+    with get_conn() as c:
+        row = c.execute(
+            f"DELETE FROM outreach_script_sets WHERE id=%s{clause} RETURNING id",
+            (script_set_id, *args),
+        ).fetchone()
+        return row is not None
+
+
+def _assign_campaign_script(c, campaign_id, lead_id, org_id):
+    existing = c.execute(
+        "SELECT script_name, script_snapshot FROM campaign_script_assignments "
+        "WHERE campaign_id=%s AND lead_id=%s",
+        (campaign_id, lead_id),
+    ).fetchone()
+    if existing:
+        return {
+            "name": existing["script_name"],
+            "snapshot": _jsonb_value(existing["script_snapshot"]),
+        }
+
+    campaign = c.execute(
+        "SELECT org_id, script_variants, script_rotation_index, "
+        "script_rotation_order "
+        "FROM campaigns WHERE id=%s AND org_id=%s",
+        (campaign_id, org_id),
+    ).fetchone()
+    if not campaign:
+        return None
+    scripts = _jsonb_value(campaign["script_variants"]) or []
+    if not scripts:
+        return None
+
+    campaign = c.execute(
+        "SELECT org_id, script_variants, script_rotation_index, "
+        "script_rotation_order "
+        "FROM campaigns WHERE id=%s AND org_id=%s FOR UPDATE",
+        (campaign_id, org_id),
+    ).fetchone()
+    existing = c.execute(
+        "SELECT script_name, script_snapshot FROM campaign_script_assignments "
+        "WHERE campaign_id=%s AND lead_id=%s",
+        (campaign_id, lead_id),
+    ).fetchone()
+    if existing:
+        return {
+            "name": existing["script_name"],
+            "snapshot": _jsonb_value(existing["script_snapshot"]),
+        }
+    scripts = _jsonb_value(campaign["script_variants"]) or []
+    if not scripts:
+        return None
+
+    setting = c.execute(
+        "SELECT value FROM outreach_settings "
+        "WHERE org_id=%s AND key=%s",
+        (org_id, "campaign_script_selection_mode"),
+    ).fetchone()
+    mode = setting["value"] if setting else "sequential"
+    if mode not in ("sequential", "random"):
+        raise RuntimeError(
+            f"Invalid organization script selection mode: {mode!r}"
+        )
+
+    from outreach_scripts import select_script_variant
+
+    script, next_index, next_order = select_script_variant(
+        mode,
+        scripts,
+        campaign["script_rotation_index"],
+        _jsonb_value(campaign["script_rotation_order"]),
+    )
+    snapshot = {
+        "name": script["name"],
+        "steps": script["steps"],
+    }
+    if mode == "sequential":
+        c.execute(
+            "UPDATE campaigns SET script_rotation_index=%s WHERE id=%s",
+            (next_index, campaign_id),
+        )
+    else:
+        c.execute(
+            "UPDATE campaigns SET script_rotation_index=%s, "
+            "script_rotation_order=%s::jsonb WHERE id=%s",
+            (next_index, json.dumps(next_order), campaign_id),
+        )
+    c.execute(
+        "INSERT INTO campaign_script_assignments "
+        "(campaign_id, lead_id, script_name, script_snapshot) "
+        "VALUES (%s, %s, %s, %s::jsonb)",
+        (campaign_id, lead_id, script["name"], json.dumps(snapshot)),
+    )
+    return {"name": script["name"], "snapshot": snapshot}
+
+
 # ── Campaigns ────────────────────────────────────────────────
-def create_campaign(name, steps, lead_ids, notes=None, org_id=None):
+def create_campaign(name, steps, lead_ids, notes=None, org_id=None, sequence_id=None,
+                    script_set_id=None):
     org = org_id_or_default(org_id)
     base = datetime.now(timezone.utc).replace(tzinfo=None)
     with get_conn() as c:
+        script_variants = []
+        if script_set_id is not None:
+            script_set = c.execute(
+                "SELECT scripts FROM outreach_script_sets "
+                "WHERE id=%s AND org_id=%s FOR SHARE",
+                (script_set_id, org),
+            ).fetchone()
+            if not script_set:
+                raise ValueError("Script set not found.")
+            script_variants = _validated_script_variants(
+                _jsonb_value(script_set["scripts"]),
+            )
+
+        if sequence_id is not None:
+            sequence = c.execute(
+                "SELECT id FROM outreach_sequences WHERE id=%s AND org_id=%s",
+                (sequence_id, org),
+            ).fetchone()
+            if not sequence:
+                raise ValueError("Sequence not found.")
+            steps = c.execute(
+                "SELECT ss.template_id, ss.delay_days "
+                "FROM outreach_sequence_steps ss "
+                "JOIN email_templates t ON t.id=ss.template_id AND t.org_id=%s "
+                "WHERE ss.sequence_id=%s ORDER BY ss.step_number",
+                (org, sequence_id),
+            ).fetchall()
+        if not steps or len(steps) > 4:
+            raise ValueError("A campaign requires between 1 and 4 sequence steps.")
+        for step in steps:
+            if not isinstance(step["delay_days"], int) or not 0 <= step["delay_days"] <= 365:
+                raise ValueError("Step delays must be between 0 and 365 days.")
+            template = c.execute(
+                "SELECT id, name, subject, body FROM email_templates "
+                "WHERE id=%s AND org_id=%s",
+                (step["template_id"], org),
+            ).fetchone()
+            if not template:
+                raise ValueError("A selected email script does not exist in this organization.")
+            step["template_name"] = template["name"]
+            step["subject"] = template["subject"]
+            step["body"] = template["body"]
+        if script_variants and any(
+            len(variant["steps"]) != len(steps) for variant in script_variants
+        ):
+            raise ValueError(
+                "Every script variant must have the same number of steps "
+                "as the selected campaign sequence."
+            )
         cur = c.execute(
-            "INSERT INTO campaigns (org_id, name, status, leads_count, created_at, notes) "
-            "VALUES (%s, %s, 'active', 0, %s, %s) RETURNING id",
-            (org, name, now(), notes),
+            "INSERT INTO campaigns "
+            "(org_id, sequence_id, name, status, leads_count, created_at, notes, "
+            "script_set_id, script_mode, script_variants, script_rotation_index) "
+            "VALUES (%s, %s, %s, 'active', 0, %s, %s, %s, %s, %s::jsonb, 0) "
+            "RETURNING id",
+            (
+                org, sequence_id, name, now(), notes, script_set_id,
+                None, json.dumps(script_variants),
+            ),
         )
         campaign_id = cur.fetchone()["id"]
 
@@ -1927,23 +2533,30 @@ def create_campaign(name, steps, lead_ids, notes=None, org_id=None):
         for i, s in enumerate(steps, 1):
             cur = c.execute(
                 "INSERT INTO campaign_steps "
-                "(campaign_id, step_number, delay_days, template_id) "
-                "VALUES (%s, %s, %s, %s) RETURNING id",
-                (campaign_id, i, s["delay_days"], s["template_id"]),
+                "(campaign_id, step_number, delay_days, template_id, "
+                "template_name, subject, body) "
+                "VALUES (%s, %s, %s, %s, %s, %s, %s) RETURNING id",
+                (campaign_id, i, s["delay_days"], s["template_id"],
+                 s["template_name"], s["subject"], s["body"]),
             )
             step_ids.append((cur.fetchone()["id"], i, s["delay_days"]))
 
         enrolled = 0
         for lead_id in lead_ids:
-            # Skip leads marked do-not-contact and leads already sitting in
-            # another active campaign — no double-emailing.
+            # Do not enroll suppressed, ineligible, or already-active recipients.
             already = c.execute(
                 "SELECT 1 FROM leads l WHERE l.id=%s AND l.org_id=%s "
-                "AND (l.do_not_contact IS TRUE "
+                "AND (l.do_not_contact IS TRUE OR l.email IS NULL OR l.email='' "
+                "OR l.status IN ('contacted','snoozed','replied','converted','dead') "
+                "OR EXISTS (SELECT 1 FROM suppression_list sl "
+                "WHERE sl.org_id=l.org_id AND "
+                "(lower(sl.email)=lower(l.email) OR "
+                "(sl.domain IS NOT NULL AND "
+                "lower(sl.domain)=lower(split_part(l.email,'@',2))))) "
                 "OR EXISTS (SELECT 1 FROM scheduled_sends s "
                 "JOIN campaigns cm ON cm.id=s.campaign_id "
-                "WHERE s.lead_id=%s AND s.status='pending' AND cm.status='active'))",
-                (lead_id, org, lead_id),
+                "WHERE s.lead_id=l.id AND s.status='pending' AND cm.status='active'))",
+                (lead_id, org),
             ).fetchone()
             if already:
                 continue
@@ -1954,9 +2567,13 @@ def create_campaign(name, steps, lead_ids, notes=None, org_id=None):
                 scheduled = (base + timedelta(days=cumulative)).isoformat(timespec="seconds")
                 c.execute(
                     "INSERT INTO scheduled_sends "
-                    "(org_id, campaign_id, step_id, step_number, lead_id, scheduled_at, status) "
-                    "VALUES (%s, %s, %s, %s, %s, %s, 'pending')",
-                    (org, campaign_id, step_id, step_num, lead_id, scheduled),
+                    "(org_id, campaign_id, step_id, step_number, lead_id, "
+                    "scheduled_at, status, script_name) "
+                    "VALUES (%s, %s, %s, %s, %s, %s, 'pending', %s)",
+                    (
+                        org, campaign_id, step_id, step_num, lead_id,
+                        scheduled, None,
+                    ),
                 )
             enrolled += 1
 
@@ -1992,7 +2609,9 @@ def campaign_steps(campaign_id, org_id=None):
     clause, args = _scope(org_id, "c.org_id")
     with get_conn() as c:
         return [dict(r) for r in c.execute(
-            "SELECT cs.*, t.name AS template_name, t.subject, t.body "
+            "SELECT cs.*, COALESCE(cs.template_name, t.name) AS template_name, "
+            "COALESCE(cs.subject, t.subject) AS subject, "
+            "COALESCE(cs.body, t.body) AS body "
             "FROM campaign_steps cs "
             "JOIN email_templates t ON t.id = cs.template_id "
             "JOIN campaigns c ON c.id = cs.campaign_id "
@@ -2029,7 +2648,9 @@ def due_sends(limit=50, org_id=None):
             "       s.lead_id, s.scheduled_at, s.account_id, "
             "       l.email, l.business_name, l.domain, l.status AS lead_status, "
             "       l.do_not_contact, "
-            "       t.subject, t.body, t.name AS template_name, "
+            "       COALESCE(cs.subject, t.subject) AS subject, "
+            "       COALESCE(cs.body, t.body) AS body, "
+            "       COALESCE(cs.template_name, t.name) AS template_name, "
             "       c.name AS campaign_name, c.status AS campaign_status "
             "FROM scheduled_sends s "
             "JOIN leads l            ON l.id = s.lead_id "
@@ -2062,8 +2683,8 @@ def claim_due_sends(limit=50, org_id=None):
             "         (s.status='sending' AND "
             "          (s.claimed_at IS NULL OR s.claimed_at <= %s)))"
             f"{clause} "
-            "  ORDER BY s.scheduled_at ASC "
-            "  FOR UPDATE OF s SKIP LOCKED LIMIT %s"
+            "  ORDER BY s.scheduled_at ASC, s.id ASC "
+            "  FOR UPDATE OF s, c SKIP LOCKED LIMIT %s"
             ") "
             "UPDATE scheduled_sends s SET status='sending', claimed_at=%s "
             "FROM claimable x WHERE s.id=x.id RETURNING s.id",
@@ -2072,22 +2693,66 @@ def claim_due_sends(limit=50, org_id=None):
         ids = [row["id"] for row in claimed]
         if not ids:
             return []
-        return [dict(row) for row in c.execute(
+
+        claimed_sends = c.execute(
+            "SELECT s.id, s.campaign_id, s.lead_id, s.org_id, c.script_variants "
+            "FROM scheduled_sends s JOIN campaigns c ON c.id=s.campaign_id "
+            "WHERE s.id = ANY(%s) ORDER BY s.scheduled_at ASC, s.id ASC",
+            (ids,),
+        ).fetchall()
+        for send in claimed_sends:
+            if not _jsonb_value(send["script_variants"]):
+                continue
+            assignment = _assign_campaign_script(
+                c, send["campaign_id"], send["lead_id"], send["org_id"],
+            )
+            if assignment:
+                c.execute(
+                    "UPDATE scheduled_sends SET script_name=%s "
+                    "WHERE campaign_id=%s AND lead_id=%s",
+                    (
+                        assignment["name"], send["campaign_id"],
+                        send["lead_id"],
+                    ),
+                )
+
+        items = [dict(row) for row in c.execute(
             "SELECT s.id AS send_id, s.org_id, s.campaign_id, s.step_id, "
             "       s.step_number, s.lead_id, s.scheduled_at, s.account_id, "
+            "       s.script_name, a.script_snapshot, "
             "       l.email, l.business_name, l.domain, "
             "       l.status AS lead_status, l.do_not_contact, "
-            "       t.subject, t.body, t.name AS template_name, "
+            "       COALESCE(cs.subject, t.subject) AS subject, "
+            "       COALESCE(cs.body, t.body) AS body, "
+            "       COALESCE(cs.template_name, t.name) AS template_name, "
             "       c.name AS campaign_name, c.status AS campaign_status "
             "FROM scheduled_sends s "
             "JOIN leads l ON l.id=s.lead_id "
             "JOIN campaign_steps cs ON cs.id=s.step_id "
             "JOIN email_templates t ON t.id=cs.template_id "
             "JOIN campaigns c ON c.id=s.campaign_id "
+            "LEFT JOIN campaign_script_assignments a "
+            "  ON a.campaign_id=s.campaign_id AND a.lead_id=s.lead_id "
             "WHERE s.id = ANY(%s) "
             "ORDER BY s.scheduled_at ASC",
             (ids,),
         ).fetchall()]
+
+        for item in items:
+            snapshot = _jsonb_value(item.get("script_snapshot"))
+            if not snapshot:
+                continue
+            step_index = item["step_number"] - 1
+            if step_index >= len(snapshot["steps"]):
+                raise RuntimeError(
+                    f"Assigned campaign script {snapshot.get('name')!r} "
+                    f"has no step {item['step_number']}."
+                )
+            script_step = snapshot["steps"][step_index]
+            item["subject"] = script_step["subject"]
+            item["body"] = script_step["body"]
+            item["template_name"] = snapshot["name"]
+        return items
 
 
 def release_send_claim(send_id, org_id=None):
@@ -3327,55 +3992,52 @@ def send_queue_summary(org_id=None):
 
 
 def list_sends(status=None, limit=100, offset=0, org_id=None):
-    """Per-lead send rows (who, which step, what happened, why) — the detail
-    behind send_queue_summary()'s aggregate counts, for a 'which leads did we
-    actually email' view instead of querying Postgres directly. Returns
-    (rows, total) so the caller can paginate instead of dumping everything
-    onto one page.
-    """
-    org_clause, org_args = _scope(org_id, "s.org_id")
+    """Paginated history for campaign sends and manual Email now messages."""
+    scheduled_scope, scheduled_args = _scope(org_id, "s.org_id")
+    outbound_scope, outbound_args = _scope(org_id, "m.org_id")
+    history = (
+        "SELECT s.id, s.status, s.step_number, s.scheduled_at, s.sent_at, s.error, "
+        "       l.id AS lead_id, l.business_name, l.email, "
+        "       cm.name AS campaign_name, 'campaign'::text AS source, "
+        "       s.script_name AS template_name "
+        "FROM scheduled_sends s "
+        "JOIN leads l ON l.id=s.lead_id "
+        "JOIN campaigns cm ON cm.id=s.campaign_id "
+        f"WHERE 1=1{scheduled_scope} "
+        "UNION ALL "
+        "SELECT -m.id AS id, "
+        "       CASE "
+        "         WHEN m.status IN ('retry','dead_letter') THEN "
+        "           CASE WHEN m.status='retry' THEN 'pending' ELSE 'failed' END "
+        "         WHEN m.status='suppressed' THEN 'skipped' "
+        "         ELSE m.status "
+        "       END AS status, "
+        "       NULL::integer AS step_number, m.created_at::text AS scheduled_at, "
+        "       m.sent_at::text AS sent_at, m.last_error AS error, "
+        "       l.id AS lead_id, l.business_name, m.to_email AS email, "
+        "       'Manual send'::text AS campaign_name, 'send_now'::text AS source, "
+        "       m.note AS template_name "
+        "FROM outbound_messages m "
+        "LEFT JOIN leads l ON l.id=m.lead_id "
+        f"WHERE m.source='send_now'{outbound_scope}"
+    )
+    where = "WHERE status=%s" if status else ""
+    filter_args = [status] if status else []
     with get_conn() as c:
-        where = "WHERE s.status=%s " if status else "WHERE 1=1 "
-        count_params = [status] if status else []
-        where += org_clause
-        count_params.extend(org_args)
         total = c.execute(
-            f"SELECT COUNT(*) AS n FROM scheduled_sends s {where}", count_params
+            f"SELECT COUNT(*) AS n FROM ({history}) sends {where}",
+            (*scheduled_args, *outbound_args, *filter_args),
         ).fetchone()["n"]
-
-        query = (
-            "SELECT s.id, s.status, s.step_number, s.scheduled_at, s.sent_at, s.error, "
-            "       l.id AS lead_id, l.business_name, l.email, "
-            "       cm.name AS campaign_name "
-            "FROM scheduled_sends s "
-            "JOIN leads l     ON l.id = s.lead_id "
-            "JOIN campaigns cm ON cm.id = s.campaign_id "
-        )
-        params = []
-        if status:
-            query += "WHERE s.status=%s "
-            params.append(status)
-        else:
-            query += "WHERE 1=1 "
-        if org_clause:
-            query += org_clause
-            params.extend(org_args)
-        query += " "
-        # 'pending' rows have no sent_at and their scheduled_at is often weeks
-        # in the future (later campaign steps) — sorting those together with
-        # completed rows by COALESCE(sent_at, scheduled_at) DESC let unsent,
-        # future-dated rows bury real sent/failed history at the top. Instead:
-        # resolved rows (sent/failed/skipped) first, most recent activity on
-        # top; pending rows after that, soonest-due first.
-        query += (
-            "ORDER BY (s.status = 'pending'), "
-            "         CASE WHEN s.status <> 'pending' THEN COALESCE(s.sent_at, s.scheduled_at) END DESC, "
-            "         CASE WHEN s.status = 'pending' THEN s.scheduled_at END ASC "
-            "LIMIT %s OFFSET %s"
-        )
-        params.extend([limit, offset])
-        rows = [dict(r) for r in c.execute(query, tuple(params)).fetchall()]
-        return rows, total
+        rows = c.execute(
+            f"SELECT * FROM ({history}) sends {where} "
+            "ORDER BY (status IN ('pending','sending')) ASC, "
+            "CASE WHEN status NOT IN ('pending','sending') "
+            "THEN COALESCE(sent_at, scheduled_at) END DESC, "
+            "CASE WHEN status IN ('pending','sending') THEN scheduled_at END ASC "
+            "LIMIT %s OFFSET %s",
+            (*scheduled_args, *outbound_args, *filter_args, limit, offset),
+        ).fetchall()
+        return [dict(row) for row in rows], total
 
 
 # ── Calls ────────────────────────────────────────────────────

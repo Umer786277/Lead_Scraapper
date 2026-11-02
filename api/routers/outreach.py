@@ -3,12 +3,12 @@ Outreach endpoints — templates, campaigns, queue, and negotiation threads
 (human-in-the-loop reply drafting + sending).
 """
 
-from typing import List, Optional
+from typing import List, Literal, Optional
 
 import db
 from api.deps import get_org_id, require_org_admin
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 router = APIRouter()
 
@@ -20,26 +20,252 @@ def list_templates(org_id: str = Depends(get_org_id)):
 
 
 class TemplateBody(BaseModel):
-    name: str
-    subject: str
-    body: str
+    step_number: Optional[int] = Field(default=None, ge=1, le=4, strict=True)
+    name: str = Field(min_length=1, max_length=120)
+    subject: str = Field(min_length=1, max_length=998)
+    body: str = Field(min_length=1, max_length=20000)
 
 
 @router.post("/templates")
-def create_template(body: TemplateBody, org_id: str = Depends(get_org_id)):
-    tid = db.upsert_template(body.name, body.subject, body.body, org_id=org_id)
+def create_template(body: TemplateBody, org_id: str = Depends(require_org_admin)):
+    values = (body.name.strip(), body.subject.strip(), body.body.strip())
+    if not all(values):
+        raise HTTPException(
+            status_code=422,
+            detail="Template name, subject, and body cannot be blank",
+        )
+    if body.step_number is not None and any(
+        template.get("step_number") == body.step_number
+        for template in db.list_templates(org_id=org_id)
+    ):
+        raise HTTPException(
+            status_code=409,
+            detail=f"Step {body.step_number} already has a template.",
+        )
+    try:
+        tid = db.upsert_template(
+            *values,
+            org_id=org_id,
+            step_number=body.step_number,
+        )
+    except db.pg_errors.UniqueViolation as exc:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Step {body.step_number} already has a template.",
+        ) from exc
     return {"id": tid}
 
 
 @router.put("/templates/{template_id}")
-def update_template(template_id: int, body: TemplateBody, org_id: str = Depends(get_org_id)):
-    db.upsert_template(body.name, body.subject, body.body, template_id=template_id, org_id=org_id)
+def update_template(
+    template_id: int,
+    body: TemplateBody,
+    org_id: str = Depends(require_org_admin),
+):
+    if not db.get_template(template_id, org_id=org_id):
+        raise HTTPException(status_code=404, detail="Email template not found")
+    values = (body.name.strip(), body.subject.strip(), body.body.strip())
+    if not all(values):
+        raise HTTPException(
+            status_code=422,
+            detail="Template name, subject, and body cannot be blank",
+        )
+    try:
+        db.upsert_template(
+            *values,
+            template_id=template_id,
+            org_id=org_id,
+            step_number=body.step_number,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except db.pg_errors.UniqueViolation as exc:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Step {body.step_number} already has a template.",
+        ) from exc
     return {"ok": True}
 
 
 @router.delete("/templates/{template_id}")
-def delete_template(template_id: int, org_id: str = Depends(get_org_id)):
+def delete_template(
+    template_id: int,
+    org_id: str = Depends(require_org_admin),
+):
+    if not db.get_template(template_id, org_id=org_id):
+        raise HTTPException(status_code=404, detail="Email template not found")
     db.delete_template(template_id, org_id=org_id)
+    return {"ok": True}
+
+
+class SequenceStepBody(BaseModel):
+    template_id: int = Field(gt=0, strict=True)
+    delay_days: int = Field(ge=0, le=365, strict=True)
+
+
+class SequenceBody(BaseModel):
+    name: str = Field(min_length=1, max_length=120)
+    steps: List[SequenceStepBody] = Field(min_length=1, max_length=4)
+
+
+def _validate_sequence_name(name: str):
+    if not name.strip():
+        raise HTTPException(status_code=422, detail="Sequence name cannot be blank")
+
+
+@router.get("/sequences")
+def list_sequences(org_id: str = Depends(get_org_id)):
+    return db.list_sequences(org_id=org_id)
+
+
+@router.post("/sequences")
+def create_sequence(body: SequenceBody, org_id: str = Depends(require_org_admin)):
+    _validate_sequence_name(body.name)
+    try:
+        sequence_id = db.upsert_sequence(
+            body.name.strip(),
+            [step.model_dump() for step in body.steps],
+            org_id=org_id,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return {"id": sequence_id}
+
+
+@router.put("/sequences/{sequence_id}")
+def update_sequence(
+    sequence_id: int,
+    body: SequenceBody,
+    org_id: str = Depends(require_org_admin),
+):
+    _validate_sequence_name(body.name)
+    try:
+        db.upsert_sequence(
+            body.name.strip(),
+            [step.model_dump() for step in body.steps],
+            sequence_id=sequence_id,
+            org_id=org_id,
+        )
+    except ValueError as exc:
+        status_code = 404 if str(exc) == "Sequence not found." else 422
+        raise HTTPException(status_code=status_code, detail=str(exc)) from exc
+    return {"ok": True}
+
+
+@router.delete("/sequences/{sequence_id}")
+def delete_sequence(
+    sequence_id: int,
+    org_id: str = Depends(require_org_admin),
+):
+    if not db.delete_sequence(sequence_id, org_id=org_id):
+        raise HTTPException(status_code=404, detail="Sequence not found")
+    return {"ok": True}
+
+
+class CampaignScriptStepBody(BaseModel):
+    subject: str = Field(min_length=1, max_length=998)
+    body: str = Field(min_length=1, max_length=20000)
+
+    @model_validator(mode="after")
+    def require_nonempty_content(self):
+        if not self.subject.strip() or not self.body.strip():
+            raise ValueError("Script subject and body cannot be blank.")
+        return self
+
+
+class CampaignScriptVariantBody(BaseModel):
+    name: str = Field(min_length=1, max_length=120)
+    steps: List[CampaignScriptStepBody] = Field(min_length=1, max_length=4)
+
+    @model_validator(mode="after")
+    def require_nonempty_name(self):
+        if not self.name.strip():
+            raise ValueError("Script name cannot be blank.")
+        return self
+
+
+class CampaignScriptSetBody(BaseModel):
+    name: str = Field(min_length=1, max_length=120)
+    scripts: List[CampaignScriptVariantBody] = Field(min_length=1, max_length=5)
+
+    @model_validator(mode="after")
+    def validate_script_set(self):
+        if not self.name.strip():
+            raise ValueError("Script set name cannot be blank.")
+        step_counts = {len(script.steps) for script in self.scripts}
+        if len(step_counts) != 1:
+            raise ValueError(
+                "Every script variant must have the same number of steps."
+            )
+        return self
+
+
+class ScriptSelectionSettingsBody(BaseModel):
+    mode: Literal["sequential", "random"]
+
+
+@router.get("/script-settings")
+def get_script_selection_settings(org_id: str = Depends(get_org_id)):
+    return {"mode": db.get_script_selection_mode(org_id=org_id)}
+
+
+@router.put("/script-settings")
+def update_script_selection_settings(
+    body: ScriptSelectionSettingsBody,
+    org_id: str = Depends(require_org_admin),
+):
+    db.set_script_selection_mode(body.mode, org_id=org_id)
+    return {"mode": body.mode}
+
+
+@router.get("/script-sets")
+def list_script_sets(org_id: str = Depends(get_org_id)):
+    return db.list_script_sets(org_id=org_id)
+
+
+@router.post("/script-sets")
+def create_script_set(
+    body: CampaignScriptSetBody,
+    org_id: str = Depends(require_org_admin),
+):
+    try:
+        script_set_id = db.create_script_set(
+            body.name.strip(),
+            [script.model_dump() for script in body.scripts],
+            org_id=org_id,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return {"id": script_set_id}
+
+
+@router.put("/script-sets/{script_set_id}")
+def update_script_set(
+    script_set_id: int,
+    body: CampaignScriptSetBody,
+    org_id: str = Depends(require_org_admin),
+):
+    try:
+        updated = db.update_script_set(
+            script_set_id,
+            body.name.strip(),
+            [script.model_dump() for script in body.scripts],
+            org_id=org_id,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    if not updated:
+        raise HTTPException(status_code=404, detail="Script set not found")
+    return {"ok": True}
+
+
+@router.delete("/script-sets/{script_set_id}")
+def delete_script_set(
+    script_set_id: int,
+    org_id: str = Depends(require_org_admin),
+):
+    if not db.delete_script_set(script_set_id, org_id=org_id):
+        raise HTTPException(status_code=404, detail="Script set not found")
     return {"ok": True}
 
 
@@ -50,21 +276,41 @@ def list_campaigns(org_id: str = Depends(get_org_id)):
 
 
 class StepSpec(BaseModel):
-    template_id: int
-    delay_days: int
+    template_id: int = Field(gt=0, strict=True)
+    delay_days: int = Field(ge=0, le=365, strict=True)
 
 
 class CampaignBody(BaseModel):
     name: str
     lead_ids: List[int]
-    steps: List[StepSpec]
+    sequence_id: Optional[int] = Field(default=None, gt=0, strict=True)
+    script_set_id: Optional[int] = Field(default=None, gt=0, strict=True)
+    steps: List[StepSpec] = Field(default_factory=list, max_length=4)
     notes: Optional[str] = None
 
 
 @router.post("/campaigns")
 def create_campaign(body: CampaignBody, org_id: str = Depends(get_org_id)):
+    if body.sequence_id is None and not body.steps:
+        raise HTTPException(
+            status_code=422,
+            detail="Select a saved sequence or provide at least one campaign step.",
+        )
+    if body.sequence_id is not None and not db.get_sequence(body.sequence_id, org_id=org_id):
+        raise HTTPException(status_code=404, detail="Sequence not found")
     steps = [s.model_dump() for s in body.steps]
-    cid = db.create_campaign(body.name, steps, body.lead_ids, notes=body.notes, org_id=org_id)
+    try:
+        cid = db.create_campaign(
+            body.name,
+            steps,
+            body.lead_ids,
+            notes=body.notes,
+            org_id=org_id,
+            sequence_id=body.sequence_id,
+            script_set_id=body.script_set_id,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     return {"id": cid}
 
 
@@ -85,11 +331,6 @@ class AccountCreate(BaseModel):
     smtp_user: Optional[str] = None
     smtp_password: Optional[str] = None
     smtp_use_tls: bool = True
-    imap_host: Optional[str] = None
-    imap_port: int = 993
-    imap_user: Optional[str] = None
-    imap_password: Optional[str] = None
-    imap_mailbox: str = "INBOX"
     daily_limit: int = 50
     hourly_limit: int = 10
     warmup_days: int = 0
@@ -105,15 +346,19 @@ class AccountUpdate(BaseModel):
     smtp_user: Optional[str] = None
     smtp_password: Optional[str] = None
     smtp_use_tls: Optional[bool] = None
-    imap_host: Optional[str] = None
-    imap_port: Optional[int] = None
-    imap_user: Optional[str] = None
-    imap_password: Optional[str] = None
-    imap_mailbox: Optional[str] = None
     daily_limit: Optional[int] = None
     hourly_limit: Optional[int] = None
     warmup_days: Optional[int] = None
     status: Optional[str] = None
+
+
+class TestEmailBody(BaseModel):
+    to_email: str = Field(
+        min_length=3,
+        max_length=320,
+        pattern=r"^[^@\s]+@[^@\s]+\.[^@\s]+$",
+    )
+    template_id: int
 
 
 @router.get("/accounts")
@@ -131,9 +376,7 @@ def create_account(body: AccountCreate, org_id: str = Depends(require_org_admin)
             label=body.label, from_name=body.from_name,
             reply_to=body.reply_to, smtp_port=body.smtp_port,
             smtp_user=body.smtp_user, smtp_password=body.smtp_password,
-            smtp_use_tls=body.smtp_use_tls, imap_host=body.imap_host,
-            imap_port=body.imap_port, imap_user=body.imap_user,
-            imap_password=body.imap_password, imap_mailbox=body.imap_mailbox,
+            smtp_use_tls=body.smtp_use_tls,
             daily_limit=body.daily_limit, hourly_limit=body.hourly_limit,
             warmup_days=body.warmup_days,
         )
@@ -166,7 +409,7 @@ def delete_account(account_id: int, org_id: str = Depends(require_org_admin)):
 
 @router.post("/accounts/{account_id}/test")
 def test_account(account_id: int, org_id: str = Depends(require_org_admin)):
-    """Attempt SMTP (and IMAP, if configured) login without sending mail."""
+    """Attempt an SMTP login without sending mail."""
     from outreach import account_smtp
     import smtplib
     import ssl as _ssl
@@ -175,7 +418,7 @@ def test_account(account_id: int, org_id: str = Depends(require_org_admin)):
     if not acct:
         raise HTTPException(status_code=404, detail="Account not found")
 
-    result = {"smtp_ok": False, "imap_ok": False, "errors": []}
+    result = {"smtp_ok": False, "errors": []}
     cfg = account_smtp(acct)
     try:
         ctx = _ssl.create_default_context()
@@ -194,19 +437,56 @@ def test_account(account_id: int, org_id: str = Depends(require_org_admin)):
     except Exception as e:
         result["errors"].append(f"SMTP: {e}")
 
-    if acct.get("imap_host"):
-        import imaplib
-        try:
-            m = imaplib.IMAP4_SSL(acct["imap_host"],
-                                  int(acct.get("imap_port") or 993), timeout=15)
-            m.login(acct.get("imap_user") or acct["from_email"],
-                    acct.get("imap_password") or "")
-            m.logout()
-            result["imap_ok"] = True
-        except Exception as e:
-            result["errors"].append(f"IMAP: {e}")
-
     return result
+
+
+@router.post("/accounts/{account_id}/send-test")
+def send_test_email(
+    account_id: int,
+    body: TestEmailBody,
+    org_id: str = Depends(require_org_admin),
+):
+    """Send one rendered template to a test address using this SMTP account."""
+    from outreach import account_from_addr, account_smtp, render, send_email
+
+    to_email = body.to_email.strip()
+
+    account = db.get_email_account(account_id, org_id=org_id, decrypt=True)
+    if not account:
+        raise HTTPException(status_code=404, detail="Sender account not found")
+    if account.get("status") != "active":
+        raise HTTPException(status_code=400, detail="Sender account is not active")
+
+    template = db.get_template(body.template_id, org_id=org_id)
+    if not template:
+        raise HTTPException(status_code=404, detail="Email template not found")
+
+    test_lead = {
+        "business_name": "Test Clinic",
+        "first_name": "there",
+        "email": to_email,
+        "hook": "This is a test email to preview your selected template.",
+        "city": "Test City",
+        "country": "Test Country",
+        "website": "https://example.com",
+    }
+
+    try:
+        message_id = send_email(
+            smtp=account_smtp(account),
+            to=to_email,
+            subject=render(template["subject"], test_lead),
+            body=render(template["body"], test_lead),
+            from_addr=account_from_addr(account),
+            reply_to=account.get("reply_to"),
+        )
+    except Exception as exc:
+        raise HTTPException(
+            status_code=502,
+            detail=f"SMTP test email failed: {str(exc)[:300]}",
+        ) from exc
+
+    return {"ok": True, "message_id": message_id}
 
 
 # ── Queue ────────────────────────────────────────────────────
@@ -310,7 +590,7 @@ def update_domain_hourly_limit(
 
 class SendNowBody(BaseModel):
     lead_ids: List[int]
-    template_id: Optional[int] = None
+    template_id: int = Field(gt=0, strict=True)
     dry_run: bool = False
 
 

@@ -1,6 +1,14 @@
 "use client";
 
-import { api, type Lead, type LeadBucketCounts } from "@/lib/api";
+import {
+  api,
+  type CampaignScriptSet,
+  type EmailSequence,
+  type EmailTemplate,
+  type Lead,
+  type LeadBucketCounts,
+  type ScriptSelectionMode,
+} from "@/lib/api";
 import { isLeadStatus, LEAD_STATUSES } from "@/lib/lead-status";
 import ConfirmDialog from "@/components/ConfirmDialog";
 import { CheckCircle, Download, Layers, Mail, Phone, Search, Send, Star, Upload, Users, XCircle } from "lucide-react";
@@ -12,8 +20,6 @@ import Pagination from "@/components/Pagination";
 const PAGE_SIZE = 50;
 
 type Bucket = "all" | "call" | "email" | "pending" | "none";
-type Template = { id: number; name: string; subject: string };
-
 const BUCKETS: { key: Bucket; label: string; icon: LucideIcon; color: string }[] = [
   { key: "call",    label: "Cold Calling",       icon: Phone,   color: "text-green-400  border-green-500/30  bg-green-500/5" },
   { key: "email",   label: "Email Outreach",      icon: Mail,   color: "text-indigo-400 border-indigo-500/30 bg-indigo-500/5" },
@@ -30,7 +36,6 @@ const STATUS_COLORS: Record<string, string> = {
   dead:       "bg-red-900/30 text-red-400",
 };
 
-type BuilderStep = { template_id: number; delay_days: number };
 type BulkConfirmation = {
   title: string;
   description: string;
@@ -89,9 +94,17 @@ function LeadsContent() {
   const [bulkMsg, setBulkMsg] = useState<string | null>(null);
   const [bulkBusy, setBulkBusy] = useState(false);
   const [builderOpen, setBuilderOpen] = useState(false);
-  const [templates, setTemplates] = useState<Template[]>([]);
+  const [sequences, setSequences] = useState<EmailSequence[]>([]);
+  const [selectedSequenceId, setSelectedSequenceId] = useState<number | "">("");
+  const [scriptSets, setScriptSets] = useState<CampaignScriptSet[]>([]);
+  const [scriptSelectionMode, setScriptSelectionMode] =
+    useState<ScriptSelectionMode>("sequential");
+  const [selectedScriptSetId, setSelectedScriptSetId] = useState<number | "">("");
   const [builderName, setBuilderName] = useState("");
-  const [builderSteps, setBuilderSteps] = useState<BuilderStep[]>([]);
+  const [sendScriptDialogOpen, setSendScriptDialogOpen] = useState(false);
+  const [sendScriptTemplates, setSendScriptTemplates] = useState<EmailTemplate[]>([]);
+  const [selectedSendScriptId, setSelectedSendScriptId] = useState<number | "">("");
+  const [sendScriptLoading, setSendScriptLoading] = useState(false);
 
   // Any filter change invalidates the current page — handlers reset to page 1.
 
@@ -219,27 +232,27 @@ function LeadsContent() {
 
   async function openBuilder() {
     setBulkMsg(null);
-    if (!templates.length) {
-      try {
-        const t = (await api.outreach.templates()) as Template[];
-        setTemplates(t);
-      } catch (e) {
-        setError((e as Error).message);
+    try {
+      const [savedSequences, savedScriptSets, scriptSettings] = await Promise.all([
+        api.outreach.sequences(),
+        api.outreach.scriptSets(),
+        api.outreach.scriptSelectionSettings(),
+      ]);
+      setSequences(savedSequences);
+      setScriptSets(savedScriptSets);
+      setScriptSelectionMode(scriptSettings.mode);
+      if (!savedSequences.length) {
+        setBulkMsg("Create a sequence on the Outreach page before starting a campaign.");
         return;
       }
+      setSelectedSequenceId(savedSequences[0].id);
+      setSelectedScriptSetId("");
+    } catch (e) {
+      setError((e as Error).message);
+      return;
     }
     setBuilderName("");
-    setBuilderSteps(defaultSteps());
     setBuilderOpen(true);
-  }
-
-  function defaultSteps(): BuilderStep[] {
-    const t = templates;
-    const delays = [0, 3, 7, 14];
-    return t.slice(0, 4).map((tmpl, i) => ({
-      template_id: tmpl.id,
-      delay_days: delays[i] ?? i,
-    }));
   }
 
   async function runBulk(fn: () => Promise<unknown>, success: string) {
@@ -278,17 +291,38 @@ function LeadsContent() {
     }
   }
 
-  function emailNow() {
+  async function emailNow() {
+    setBulkMsg(null);
+    setSendScriptLoading(true);
+    try {
+      const availableScripts = await api.outreach.templates();
+      if (!availableScripts.length) {
+        setBulkMsg("Create an email script on the Outreach page before sending.");
+        return;
+      }
+      setSendScriptTemplates(availableScripts);
+      setSelectedSendScriptId("");
+      setSendScriptDialogOpen(true);
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setSendScriptLoading(false);
+    }
+  }
+
+  async function sendSelectedScriptNow() {
+    if (selectedSendScriptId === "") return;
     const ids = selected;
-    setBulkConfirmation({
-      title: "Send intro emails now?",
-      description: `Send the intro email to ${ids.length} selected lead${ids.length === 1 ? "" : "s"} immediately?`,
-      confirmLabel: "Send emails",
-      onConfirm: () => runBulk(
-        () => api.outreach.sendNow({ lead_ids: ids }),
-        `Queued immediate send for ${ids.length} lead(s).`
-      ),
-    });
+    await runBulk(
+      () => api.outreach.sendNow({
+        lead_ids: ids,
+        template_id: selectedSendScriptId,
+      }),
+      `Queued immediate send using "${sendScriptTemplates.find(
+        (template) => template.id === selectedSendScriptId,
+      )?.name ?? "selected script"}" for ${ids.length} lead(s).`,
+    );
+    setSendScriptDialogOpen(false);
   }
 
   function queueCalls() {
@@ -327,9 +361,24 @@ function LeadsContent() {
       setBulkMsg("Give the campaign a name.");
       return;
     }
-    const steps = builderSteps.filter((s) => s.template_id);
-    if (!steps.length) {
-      setBulkMsg("At least one step with a template is required.");
+    if (selectedSequenceId === "") {
+      setBulkMsg("Choose a sequence for this campaign.");
+      return;
+    }
+    const scriptSet = scriptSets.find((item) => item.id === selectedScriptSetId);
+    const selectedSequence = sequences.find(
+      (item) => item.id === selectedSequenceId,
+    );
+    if (
+      scriptSet &&
+      selectedSequence &&
+      scriptSet.scripts.some(
+        (script) => script.steps.length !== selectedSequence.steps.length,
+      )
+    ) {
+      setBulkMsg(
+        "Every script variant must match the selected sequence's number of steps. Update the script set on the Outreach page.",
+      );
       return;
     }
     setBulkBusy(true);
@@ -338,7 +387,10 @@ function LeadsContent() {
       const res = await api.outreach.createCampaign({
         name: builderName.trim(),
         lead_ids: selected,
-        steps,
+        sequence_id: selectedSequenceId,
+        ...(selectedScriptSetId !== ""
+          ? { script_set_id: selectedScriptSetId }
+          : {}),
       });
       setBulkMsg(`Campaign #${res.id} created with ${selected.length} lead(s).`);
       setBuilderOpen(false);
@@ -351,6 +403,12 @@ function LeadsContent() {
     }
   }
 
+  const selectedScriptSet = scriptSets.find(
+    (item) => item.id === selectedScriptSetId,
+  );
+  const selectedCampaignSequence = sequences.find(
+    (item) => item.id === selectedSequenceId,
+  );
   const activeBucket = BUCKETS.find((b) => b.key === bucket)!
 
   return (
@@ -490,10 +548,10 @@ function LeadsContent() {
             </button>
             <button
               onClick={emailNow}
-              disabled={bulkBusy}
+              disabled={bulkBusy || sendScriptLoading}
               className="flex items-center gap-1.5 px-4 py-2 rounded-lg border border-indigo-500/40 bg-indigo-500/20 hover:bg-indigo-500/30 disabled:opacity-40 text-indigo-200 text-sm font-medium transition"
             >
-              <Send size={14} /> Email now
+              <Send size={14} /> {sendScriptLoading ? "Loading scripts…" : "Email now"}
             </button>
             <button
               onClick={queueCalls}
@@ -707,67 +765,64 @@ function LeadsContent() {
               className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-2.5 text-sm text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/40"
             />
 
-            <div className="space-y-2">
-              <div className="flex items-center justify-between">
-                <p className="text-xs text-slate-400 uppercase tracking-wider font-semibold">Steps (send order)</p>
-                <button
-                  onClick={() => {
-                    const t = templates;
-                    if (t.length) {
-                      setBuilderSteps((prev) => [...prev, { template_id: t[0].id, delay_days: 7 }]);
-                    } else {
-                      setBulkMsg("No templates available — create one on the Outreach page first.");
-                    }
-                  }}
-                  className="text-xs text-indigo-400 hover:text-indigo-300"
-                >
-                  + Add step
-                </button>
-              </div>
-              {builderSteps.map((step, i) => (
-                <div key={i} className="flex items-center gap-2">
-                  <span className="w-5 text-xs text-slate-500 font-mono">{i + 1}</span>
-                  <select
-                    value={step.template_id}
-                    onChange={(e) => {
-                      const steps = [...builderSteps];
-                      steps[i] = { ...steps[i], template_id: Number(e.target.value) };
-                      setBuilderSteps(steps);
-                    }}
-                    className="flex-1 bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:outline-none"
-                  >
-                    <option value={0} className="bg-[#1a1d2e]">— pick template —</option>
-                    {templates.map((t) => (
-                      <option key={t.id} value={t.id} className="bg-[#1a1d2e]">{t.name}</option>
-                    ))}
-                  </select>
-                  <label className="flex items-center gap-1.5 text-xs text-slate-400 whitespace-nowrap">
-                    <input
-                      type="number"
-                      min={0}
-                      value={step.delay_days}
-                      onChange={(e) => {
-                        const steps = [...builderSteps];
-                        steps[i] = { ...steps[i], delay_days: Math.max(0, Number(e.target.value) || 0) };
-                        setBuilderSteps(steps);
-                      }}
-                      className="w-16 bg-white/5 border border-white/10 rounded-lg px-2 py-2 text-sm text-white text-center focus:outline-none"
-                    />
-                    days later
-                  </label>
-                  <button
-                    onClick={() => setBuilderSteps((prev) => prev.filter((_, j) => j !== i))}
-                    className="text-slate-500 hover:text-red-400 text-lg leading-none px-1"
-                    title="Remove step"
-                  >
-                    ×
-                  </button>
-                </div>
-              ))}
-              <p className="text-xs text-slate-500">
-                Step 1 fires as soon as it&apos;s due; later steps wait their delay. Excluded leads and leads already in an active campaign are skipped automatically.
-              </p>
-            </div>
+            <label className="block text-xs text-slate-400">
+              Sequence
+              <select
+                value={selectedSequenceId}
+                onChange={(e) => setSelectedSequenceId(Number(e.target.value))}
+                className="mt-1 w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:outline-none [&>option]:bg-[#1a1d2e]"
+              >
+                {sequences.map((sequence) => (
+                  <option key={sequence.id} value={sequence.id}>{sequence.name}</option>
+                ))}
+              </select>
+            </label>
+            <label className="block text-xs text-slate-400">
+              Campaign script variants (optional)
+              <select
+                value={selectedScriptSetId}
+                onChange={(e) => setSelectedScriptSetId(
+                  e.target.value ? Number(e.target.value) : "",
+                )}
+                className="mt-1 w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:outline-none [&>option]:bg-[#1a1d2e]"
+              >
+                <option value="">Use the selected sequence&apos;s scripts</option>
+                {scriptSets.map((scriptSet) => (
+                  <option key={scriptSet.id} value={scriptSet.id}>
+                    {scriptSet.name}
+                  </option>
+                ))}
+              </select>
+              {selectedScriptSet && (
+                <span className="mt-1 block text-slate-500">
+                  {selectedScriptSet.scripts.length} variants; assigned {scriptSelectionMode === "sequential"
+                    ? "in order"
+                    : "at random"} using the organization-wide setting. The sequence&apos;s existing follow-up delays are retained.
+                </span>
+              )}
+              {selectedScriptSet && selectedCampaignSequence &&
+                selectedScriptSet.scripts.some((script) => (
+                  script.steps.length !== selectedCampaignSequence.steps.length
+                )) && (
+                  <span className="mt-1 block text-amber-300">
+                    This set&apos;s variants must have the same number of steps as the selected sequence.
+                  </span>
+                )}
+            </label>
+            {sequences.find((sequence) => sequence.id === selectedSequenceId) && (
+              <ol className="space-y-1 rounded-xl border border-white/8 bg-white/3 p-3">
+                {sequences.find((sequence) => sequence.id === selectedSequenceId)?.steps.map((step) => (
+                  <li key={step.step_number} className="text-xs text-slate-400">
+                    {step.step_number === 1
+                      ? `Initial email: ${step.template_name}`
+                      : `Follow-up ${step.step_number - 1}: ${step.template_name}, ${step.delay_days} days after previous`}
+                  </li>
+                ))}
+              </ol>
+            )}
+            <p className="text-xs text-slate-500">
+              Replies, unsubscribes, bounces, and suppressed recipients stop pending follow-ups.
+            </p>
 
             <div className="flex justify-end gap-3">
               <button
@@ -782,6 +837,67 @@ function LeadsContent() {
                 className="px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 text-white text-sm font-semibold transition"
               >
                 {bulkBusy ? "Creating…" : "Create campaign"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Email script selection */}
+      {sendScriptDialogOpen && (
+        <div
+          className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4"
+          onClick={() => setSendScriptDialogOpen(false)}
+        >
+          <div
+            className="bg-[#1a1d2e] border border-white/10 rounded-2xl p-6 max-w-lg w-full space-y-4"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <p className="text-xs text-slate-500 mb-0.5">Email selected leads</p>
+                <h3 className="text-base font-semibold text-white">Choose an email script</h3>
+              </div>
+              <button
+                onClick={() => setSendScriptDialogOpen(false)}
+                className="text-slate-400 hover:text-white text-xl leading-none"
+                aria-label="Close script selection"
+              >
+                ×
+              </button>
+            </div>
+            <p className="text-sm text-slate-400">
+              This sends one email using the selected subject and body to {selected.length} selected lead(s).
+            </p>
+            <label className="block text-xs text-slate-400">
+              Email script
+              <select
+                value={selectedSendScriptId}
+                onChange={(e) => setSelectedSendScriptId(e.target.value ? Number(e.target.value) : "")}
+                className="mt-1 w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:outline-none [&>option]:bg-[#1a1d2e]"
+              >
+                <option value="">Select a script</option>
+                {sendScriptTemplates.map((template) => (
+                  <option key={template.id} value={template.id}>
+                    {template.step_number ? `Step ${template.step_number} — ` : ""}
+                    {template.name} — {template.subject}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <div className="flex justify-end gap-3">
+              <button
+                onClick={() => setSendScriptDialogOpen(false)}
+                className="px-4 py-2.5 rounded-xl border border-white/10 bg-white/5 hover:bg-white/10 text-slate-300 text-sm transition"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={sendSelectedScriptNow}
+                disabled={bulkBusy || selectedSendScriptId === ""}
+                className="px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 text-white text-sm font-semibold transition"
+              >
+                {bulkBusy ? "Queuing…" : "Send selected script"}
               </button>
             </div>
           </div>

@@ -2,9 +2,12 @@
 Automation worker — background process driving the email pipeline.
 
 Jobs (all run independently via APScheduler):
-  enrich  (every 30 s): new leads with domains → extract emails → enroll in auto campaign
+  enrich  (every 5 min): new leads with domains → extract contact details
   send    (every 60 s): process the outreach send queue via SMTP
   inbox   (every 2 min): IMAP poll for replies → cancel follow-ups, react to intents
+
+Leads are no longer automatically enrolled in the legacy four-step campaign.
+Users start campaigns explicitly from the Leads page.
 
 Run as a separate process, or use the API's integrated worker runner:
     pip install apscheduler
@@ -74,12 +77,10 @@ from apscheduler.schedulers.blocking import BlockingScheduler
 
 import db
 from coordination import run_scheduled_job
-from outreach import SMTPConfig, process_queue, seed_default_templates
+from outreach import SMTPConfig, process_queue
 
 # ── Config ───────────────────────────────────────────────────
 ENRICH_BATCH        = 10    # max domains per enrich run
-OUTREACH_DELAY_MIN  = 2     # minutes after email found → first send
-FOLLOWUP_DELAYS_DAYS = [3, 7, 14]  # incremental delays between follow-ups
 STATE_FILE          = Path(__file__).parent / "worker_state.json"
 
 logging.basicConfig(
@@ -145,109 +146,6 @@ def _email_score(e: dict) -> int:
     return conf + category_bonus + source_bonus
 
 
-# ── Auto-campaign bootstrap ──────────────────────────────────
-def _ensure_auto_campaign(org_id=None) -> tuple[int | None, list]:
-    """
-    Idempotently create the per-org 'Auto Outreach' campaign with 4 steps using
-    the default templates. Returns (campaign_id, steps_list). Each step dict has
-    keys: step_id, step_number, delay_days, template_id.
-    """
-    org = db.org_id_or_default(org_id)
-    seed_default_templates(org_id=org)
-    templates = db.list_templates(org_id=org)
-    if not templates:
-        log.error("No email templates — cannot create auto campaign")
-        return None, []
-
-    with db.get_conn() as c:
-        row = c.execute(
-            "SELECT id FROM campaigns WHERE org_id=%s AND name='Auto Outreach' LIMIT 1",
-            (org,),
-        ).fetchone()
-
-        if row:
-            campaign_id = row["id"]
-        else:
-            cur = c.execute(
-                "INSERT INTO campaigns (org_id, name, status, leads_count, created_at, notes) "
-                "VALUES (%s, 'Auto Outreach', 'active', 0, %s, %s) RETURNING id",
-                (org, db.now(), "Managed by worker.py — do not edit steps manually."),
-            )
-            campaign_id = cur.fetchone()["id"]
-            log.info(f"Created auto campaign id={campaign_id}")
-
-        # Ensure steps exist
-        existing_steps = c.execute(
-            "SELECT cs.id AS step_id, cs.step_number, cs.delay_days, cs.template_id "
-            "FROM campaign_steps cs WHERE cs.campaign_id=%s ORDER BY cs.step_number",
-            (campaign_id,),
-        ).fetchall()
-
-        if not existing_steps:
-            # Step 1 has delay_days=0 (timing comes from OUTREACH_DELAY_MIN)
-            # Steps 2-4 use FOLLOWUP_DELAYS_DAYS as incremental gaps
-            delays = [0] + FOLLOWUP_DELAYS_DAYS
-            step_records = []
-            for i, (delay, tmpl) in enumerate(zip(delays, templates), 1):
-                cur = c.execute(
-                    "INSERT INTO campaign_steps "
-                    "(campaign_id, step_number, delay_days, template_id) "
-                    "VALUES (%s, %s, %s, %s) RETURNING id",
-                    (campaign_id, i, delay, tmpl["id"]),
-                )
-                step_records.append({
-                    "step_id":     cur.fetchone()["id"],
-                    "step_number": i,
-                    "delay_days":  delay,
-                    "template_id": tmpl["id"],
-                })
-            log.info(f"Created {len(step_records)} steps for auto campaign")
-            return campaign_id, step_records
-
-        return campaign_id, [dict(s) for s in existing_steps]
-
-
-def _enroll_lead(lead_id: int, campaign_id: int, steps: list, org_id=None) -> bool:
-    """
-    Schedule all campaign steps for one lead. Step 1 fires in OUTREACH_DELAY_MIN
-    minutes; subsequent steps add their delay_days on top of that anchor.
-    Returns True if enrolled, False if skipped (already enrolled or ineligible).
-    """
-    anchor = datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(minutes=OUTREACH_DELAY_MIN)
-
-    with db.get_conn() as c:
-        # Already enrolled?
-        if c.execute(
-            "SELECT 1 FROM scheduled_sends WHERE lead_id=%s AND campaign_id=%s LIMIT 1",
-            (lead_id, campaign_id),
-        ).fetchone():
-            return False
-
-        lead = c.execute(
-            "SELECT org_id, email, status, do_not_contact FROM leads WHERE id=%s", (lead_id,)
-        ).fetchone()
-        if not lead or not lead["email"]:
-            return False
-        if lead["status"] in ("replied", "converted", "dead", "contacted", "snoozed"):
-            return False
-        if lead["do_not_contact"]:
-            return False
-
-        org = org_id or lead["org_id"] or db.DEFAULT_ORG_ID
-        cumulative = timedelta(0)
-        for step in steps:
-            if step["step_number"] > 1:
-                cumulative += timedelta(days=step["delay_days"])
-            send_at = (anchor + cumulative).isoformat(timespec="seconds")
-            c.execute(
-                "INSERT INTO scheduled_sends "
-                "(org_id, campaign_id, step_id, step_number, lead_id, scheduled_at, status) "
-                "VALUES (%s, %s, %s, %s, %s, %s, 'pending')",
-                (org, campaign_id, step["step_id"], step["step_number"], lead_id, send_at),
-            )
-    return True
-
-
 # ── AI improvement note + client-facing lead line ─────────────
 def _generate_improvement_note(domain: str, snippet: str) -> dict | None:
     """Generate the AI note + lead_line for a domain's snippet.
@@ -269,8 +167,8 @@ def _generate_improvement_note(domain: str, snippet: str) -> dict | None:
 
 
 # ── Jobs ─────────────────────────────────────────────────────
-def job_enrich(state: dict, campaign_id: int | None, steps: list):
-    """Find leads with domains but no email, extract, then enroll in auto campaign."""
+def job_enrich(state: dict):
+    """Find leads with domains but no email and extract available contact details."""
     log.info("enrich: starting")
     result = {"at": _now_str(), "found": 0, "enriched": 0, "enrolled": 0, "error": None}
 
@@ -333,17 +231,11 @@ def job_enrich(state: dict, campaign_id: int | None, steps: list):
 
                 context.route("**/*", _block)
 
-                campaigns: dict = {}
                 for row in rows:
                     org      = row["org_id"]
                     domain   = row["domain"]
                     lead_ids = row["lead_ids"]
                     log.info(f"enrich: [{org}] {domain} (leads: {lead_ids})")
-
-                    if org not in campaigns:
-                        cid, csteps = _ensure_auto_campaign(org_id=org)
-                        campaigns[org] = (cid, csteps)
-                    org_campaign_id, org_steps = campaigns[org]
 
                     try:
                         extraction = extract_from_domain(domain, context)
@@ -431,12 +323,6 @@ def job_enrich(state: dict, campaign_id: int | None, steps: list):
                             f"enrich: {domain} → {best_email['email']} "
                             f"({best_email['confidence']})"
                         )
-
-                        # Enroll each lead in this org's auto outreach campaign
-                        if org_campaign_id and org_steps:
-                            for lid in lead_ids:
-                                if _enroll_lead(lid, org_campaign_id, org_steps, org_id=org):
-                                    result["enrolled"] += 1
                     else:
                         log.info(f"enrich: {domain} → no emails found")
 
@@ -490,26 +376,27 @@ def _on_send_item(item, outcome, detail):
     who = (f"lead #{lead_id} "
            f"({item.get('business_name') or item.get('email') or item.get('to_email') or '?'})")
     suffix = f" step {step}" if step is not None else ""
+    script_suffix = f" script={item['script_name']}" if item.get("script_name") else ""
     if outcome == "sent":
-        log.info(f"send: {who}{suffix} -> sent")
+        log.info(f"send: {who}{suffix}{script_suffix} -> sent")
     elif outcome == "failed":
-        log.warning(f"send: {who}{suffix} -> FAILED: {detail}")
+        log.warning(f"send: {who}{suffix}{script_suffix} -> FAILED: {detail}")
     elif outcome == "unknown":
-        log.warning(f"send: {who}{suffix} -> UNKNOWN (not retried): {detail}")
+        log.warning(f"send: {who}{suffix}{script_suffix} -> UNKNOWN (not retried): {detail}")
     elif outcome == "retry":
-        log.info(f"send: {who}{suffix} -> retry scheduled: {detail}")
+        log.info(f"send: {who}{suffix}{script_suffix} -> retry scheduled: {detail}")
     elif outcome == "dead_letter":
-        log.error(f"send: {who}{suffix} -> dead-lettered: {detail}")
+        log.error(f"send: {who}{suffix}{script_suffix} -> dead-lettered: {detail}")
     elif outcome == "circuit_broken":
         log.error(f"send: {detail}")
     elif outcome == "no_sender":
         log.warning(f"send: {detail}")
     elif outcome == "skipped":
-        log.debug(f"send: {who} -> skipped ({detail})")
+        log.debug(f"send: {who}{script_suffix} -> skipped ({detail})")
     elif outcome == "deferred":
         log.debug(f"send: {who} -> deferred ({detail})")
     elif outcome == "queued":
-        log.info(f"send: {who}{suffix} -> queued ({detail})")
+        log.info(f"send: {who}{suffix}{script_suffix} -> queued ({detail})")
 
 def job_send(state: dict):
     """Process due scheduled sends.
@@ -703,6 +590,96 @@ def job_booking_replies(state: dict):
     state["jobs"]["booking_replies"] = result
     _write_state(state, force_db=True)
 
+def job_scrape_rotation(state: dict, org_id=None, persist_state=True):
+    """Run one due saturation-aware city scrape for an organization."""
+    from scrape_planner import (
+        count_leads_for,
+        pick_next_query,
+        query_target_leads,
+        record_run_result,
+    )
+
+    log.info("rotation: tick%s", f" [{org_id}]" if org_id else "")
+    result = {
+        "at": _now_str(),
+        "org_id": str(org_id) if org_id is not None else None,
+        "query": None,
+        "leads_added": 0,
+        "dedup_rate": None,
+        "next_in_hrs": None,
+        "error": None,
+    }
+    query = None
+
+    try:
+        query = pick_next_query(org_id=org_id)
+        if not query:
+            log.info("rotation: no due queries%s", f" [{org_id}]" if org_id else "")
+        else:
+            query_org_id = org_id or query["org_id"]
+            result["org_id"] = str(query_org_id)
+            result["query"] = (
+                f"{query['niche']} · {query['city']} · {query['country']}"
+            )
+            target = query_target_leads(
+                query_org_id, query["niche"], query["country"],
+            )
+            log.info(
+                "rotation: %s [%s] (target=%s)",
+                result["query"], query_org_id, target,
+            )
+
+            before = count_leads_for(
+                query["city"], query["country"], org_id=query_org_id,
+            )
+
+            from pipeline import run_pipeline
+            run_pipeline(
+                searches=[{
+                    "niche": query["niche"],
+                    "city": query["city"],
+                    "country": query["country"],
+                }],
+                max_leads=target,
+                headless=True,
+                enrich_emails=False,
+                on_event=lambda kind, message, **extra: None,
+                org_id=query_org_id,
+            )
+
+            after = count_leads_for(
+                query["city"], query["country"], org_id=query_org_id,
+            )
+            leads_added = max(0, after - before)
+            info = record_run_result(query["id"], leads_added, target)
+            result["leads_added"] = leads_added
+            result["dedup_rate"] = info["dedup_rate"]
+            result["next_in_hrs"] = info["next_in_hrs"]
+            log.info(
+                "rotation: %s [%s] -> +%s leads "
+                "(dedup_rate=%s, next in %sh)",
+                result["query"], query_org_id, leads_added,
+                info["dedup_rate"], info["next_in_hrs"],
+            )
+    except Exception as exc:
+        log.error("rotation job crashed [%s]: %s", org_id, exc, exc_info=True)
+        result["error"] = str(exc)[:300]
+        if query:
+            try:
+                record_run_result(query["id"], 0, 1, error=str(exc))
+            except Exception:
+                log.exception(
+                    "rotation: failed to record scrape error for query %s",
+                    query["id"],
+                )
+    finally:
+        state["jobs"]["rotation"] = result
+        if persist_state:
+            _write_state(state)
+
+    return result
+
+
 def job_scrape_rotation_all(state: dict):
     """Run one due scrape per organization with independent distributed locks."""
     from concurrent.futures import ThreadPoolExecutor
@@ -794,19 +771,13 @@ def main():
     }
     _write_state(state)
 
-    log.info("Bootstrapping auto campaign…")
-    campaign_id, steps = _ensure_auto_campaign()
-    state["auto_campaign_id"] = campaign_id
-    _write_state(state)
-    log.info(f"Auto campaign id={campaign_id}, {len(steps)} step(s)")
+    log.info("Automatic lead enrollment is disabled; campaigns start from the Leads page.")
 
     now_utc = datetime.now(timezone.utc)
 
     scheduler = BlockingScheduler(timezone="UTC")
     scheduler.add_job(
-        lambda: run_scheduled_job(
-            "enrich", lambda: job_enrich(state, campaign_id, steps)
-        ),
+        lambda: run_scheduled_job("enrich", lambda: job_enrich(state)),
         "interval", minutes=5, id="enrich", max_instances=1,
         next_run_time=now_utc,                           # run immediately on start
         jitter=30,                                       # de-collide 5-min bursts

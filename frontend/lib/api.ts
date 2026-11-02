@@ -125,10 +125,6 @@ export interface EmailAccount {
   smtp_port: number;
   smtp_user: string | null;
   smtp_use_tls: boolean;
-  imap_host: string | null;
-  imap_port: number;
-  imap_user: string | null;
-  imap_mailbox: string | null;
   daily_limit: number;
   hourly_limit: number;
   warmup_started_at: string | null;
@@ -136,8 +132,68 @@ export interface EmailAccount {
   status: string;
   last_used_at: string | null;
   has_smtp_password: boolean;
-  has_imap_password: boolean;
 }
+
+export interface EmailTemplate {
+  id: number;
+  step_number: number | null;
+  name: string;
+  subject: string;
+  body: string;
+}
+
+export interface EmailTemplateInput {
+  step_number: number | null;
+  name: string;
+  subject: string;
+  body: string;
+}
+
+export interface EmailSequenceStep {
+  step_number: number;
+  delay_days: number;
+  template_id: number;
+  template_name: string;
+  subject: string;
+}
+
+export interface EmailSequence {
+  id: number;
+  name: string;
+  created_at: string;
+  updated_at: string;
+  steps: EmailSequenceStep[];
+}
+
+export interface EmailSequenceInput {
+  name: string;
+  steps: { template_id: number; delay_days: number }[];
+}
+
+export interface CampaignScriptStep {
+  subject: string;
+  body: string;
+}
+
+export interface CampaignScriptVariant {
+  name: string;
+  steps: CampaignScriptStep[];
+}
+
+export interface CampaignScriptSet {
+  id: number;
+  name: string;
+  scripts: CampaignScriptVariant[];
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CampaignScriptSetInput {
+  name: string;
+  scripts: CampaignScriptVariant[];
+}
+
+export type ScriptSelectionMode = "sequential" | "random";
 
 export interface LeadBucketCounts {
   all: number;
@@ -322,7 +378,6 @@ export const api = {
       from_email: string;
       smtp_host: string;
       smtp_password?: string;
-      imap_password?: string;
     }) =>
       apiFetch<{ id: number }>("/api/outreach/accounts", {
         method: "POST",
@@ -330,7 +385,6 @@ export const api = {
       }),
     updateAccount: (id: number, body: Partial<EmailAccount> & {
       smtp_password?: string;
-      imap_password?: string;
     }) =>
       apiFetch<{ ok: boolean }>(`/api/outreach/accounts/${id}`, {
         method: "PATCH",
@@ -341,11 +395,67 @@ export const api = {
         method: "DELETE",
       }),
     testAccount: (id: number) =>
-      apiFetch<{ smtp_ok: boolean; imap_ok: boolean; errors: string[] }>(
+      apiFetch<{ smtp_ok: boolean; errors: string[] }>(
         `/api/outreach/accounts/${id}/test`,
         { method: "POST" }
       ),
-    templates: () => apiFetch("/api/outreach/templates"),
+    sendTestEmail: (id: number, body: { to_email: string; template_id: number }) =>
+      apiFetch<{ ok: boolean; message_id: string }>(
+        `/api/outreach/accounts/${id}/send-test`,
+        {
+          method: "POST",
+          body: JSON.stringify(body),
+        }
+      ),
+    templates: () => apiFetch<EmailTemplate[]>("/api/outreach/templates"),
+    createTemplate: (body: EmailTemplateInput) =>
+      apiFetch<{ id: number }>("/api/outreach/templates", {
+        method: "POST",
+        body: JSON.stringify(body),
+      }),
+    updateTemplate: (id: number, body: EmailTemplateInput) =>
+      apiFetch<{ ok: boolean }>(`/api/outreach/templates/${id}`, {
+        method: "PUT",
+        body: JSON.stringify(body),
+      }),
+    sequences: () => apiFetch<EmailSequence[]>("/api/outreach/sequences"),
+    createSequence: (body: EmailSequenceInput) =>
+      apiFetch<{ id: number }>("/api/outreach/sequences", {
+        method: "POST",
+        body: JSON.stringify(body),
+      }),
+    updateSequence: (id: number, body: EmailSequenceInput) =>
+      apiFetch<{ ok: boolean }>(`/api/outreach/sequences/${id}`, {
+        method: "PUT",
+        body: JSON.stringify(body),
+      }),
+    deleteSequence: (id: number) =>
+      apiFetch<{ ok: boolean }>(`/api/outreach/sequences/${id}`, {
+        method: "DELETE",
+      }),
+    scriptSets: () =>
+      apiFetch<CampaignScriptSet[]>("/api/outreach/script-sets"),
+    scriptSelectionSettings: () =>
+      apiFetch<{ mode: ScriptSelectionMode }>("/api/outreach/script-settings"),
+    updateScriptSelectionSettings: (mode: ScriptSelectionMode) =>
+      apiFetch<{ mode: ScriptSelectionMode }>("/api/outreach/script-settings", {
+        method: "PUT",
+        body: JSON.stringify({ mode }),
+      }),
+    createScriptSet: (body: CampaignScriptSetInput) =>
+      apiFetch<{ id: number }>("/api/outreach/script-sets", {
+        method: "POST",
+        body: JSON.stringify(body),
+      }),
+    updateScriptSet: (id: number, body: CampaignScriptSetInput) =>
+      apiFetch<{ ok: boolean }>(`/api/outreach/script-sets/${id}`, {
+        method: "PUT",
+        body: JSON.stringify(body),
+      }),
+    deleteScriptSet: (id: number) =>
+      apiFetch<{ ok: boolean }>(`/api/outreach/script-sets/${id}`, {
+        method: "DELETE",
+      }),
     campaigns: () => apiFetch("/api/outreach/campaigns"),
     queue: () => apiFetch("/api/outreach/queue"),
     limits: () =>
@@ -391,7 +501,9 @@ export const api = {
     createCampaign: (body: {
       name: string;
       lead_ids: number[];
-      steps: { template_id: number; delay_days: number }[];
+      sequence_id?: number;
+      script_set_id?: number;
+      steps?: { template_id: number; delay_days: number }[];
       notes?: string;
     }) =>
       apiFetch<{ id: number }>("/api/outreach/campaigns", {

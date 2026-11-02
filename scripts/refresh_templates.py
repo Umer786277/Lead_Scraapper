@@ -8,8 +8,8 @@ the missing piece: match by name and overwrite subject/body.
 Run after editing DEFAULT_TEMPLATES:
     python -m scripts.refresh_templates
 
-Templates not present in the DB are inserted.
-Templates the user added manually (no matching name) are left alone.
+Missing defaults are inserted only into unassigned steps. Customized templates
+and templates the user added manually are left alone.
 """
 
 import db
@@ -18,22 +18,40 @@ from outreach import DEFAULT_TEMPLATES
 
 def run():
     db.init_db()
-    existing = {t["name"]: t for t in db.list_templates()}
+    org_id = db.DEFAULT_ORG_ID
+    templates = db.list_templates(org_id=org_id)
+    by_step = {
+        t["step_number"]: t
+        for t in templates
+        if t.get("step_number") in range(1, 5)
+    }
+    by_name = {t["name"]: t for t in templates}
 
     inserted, updated, skipped = 0, 0, 0
     for t in DEFAULT_TEMPLATES:
-        match = existing.get(t["name"])
+        match = by_name.get(t["name"])
         if match:
             if match["subject"] == t["subject"] and match["body"] == t["body"]:
                 skipped += 1
                 continue
-            db.upsert_template(t["name"], t["subject"], t["body"], match["id"])
+            db.upsert_template(
+                t["name"], t["subject"], t["body"], match["id"],
+                org_id=org_id,
+                step_number=t["step_number"],
+            )
             updated += 1
-            print(f"  updated: {t['name']}")
+            print(f"  updated step {t['step_number']}: {t['name']}")
         else:
-            db.upsert_template(t["name"], t["subject"], t["body"])
+            if t["step_number"] in by_step:
+                skipped += 1
+                continue
+            db.upsert_template(
+                t["name"], t["subject"], t["body"],
+                org_id=org_id,
+                step_number=t["step_number"],
+            )
             inserted += 1
-            print(f"  inserted: {t['name']}")
+            print(f"  inserted step {t['step_number']}: {t['name']}")
 
     print(f"\nDone. inserted={inserted} updated={updated} unchanged={skipped}")
 
