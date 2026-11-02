@@ -12,14 +12,11 @@ apscheduler>=3.10.0
 fastapi>=0.111.0
 uvicorn[standard]>=0.29.0
 python-jose[cryptography]>=3.3.0  # JWT verification (Supabase tokens)
+cryptography>=42.0.0               # Fernet encryption for stored SMTP/IMAP secrets
 python-multipart>=0.0.9            # form data support
 
-# AI / outreach
-openai>=1.0.0
+# AI / outreach (Google AI Studio / Gemini via direct REST — no SDK needed)
 
 # Data + utilities
 pandas>=2.0.0
 requests>=2.31.0
-
-# Legacy Streamlit (keep while transitioning to Next.js)
-streamlit>=1.35.0

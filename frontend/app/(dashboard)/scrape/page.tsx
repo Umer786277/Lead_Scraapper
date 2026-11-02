@@ -1,6 +1,7 @@
 "use client";
 
 import { api } from "@/lib/api";
+import { CheckCircle2, Rocket } from "lucide-react";
 import { useEffect, useState } from "react";
 
 interface SearchRow { niche: string; city: string; country: string; }
@@ -45,10 +46,17 @@ export default function ScrapePage() {
 
   // Recurring schedules
   const [schedules, setSchedules] = useState<Schedule[]>([]);
+  const [canManageSchedules, setCanManageSchedules] = useState(false);
   const [scheduling, setScheduling] = useState(false);
   const [scheduleMsg, setScheduleMsg] = useState("");
+  const [scheduleOk, setScheduleOk] = useState(false);
 
-  useEffect(() => { loadSchedules(); }, []);
+  useEffect(() => {
+    void loadSchedules();
+    api.orgs.members.list()
+      .then(({ can_manage }) => setCanManageSchedules(can_manage))
+      .catch((loadError) => setError((loadError as Error).message));
+  }, []);
 
   async function loadSchedules() {
     try {
@@ -98,18 +106,20 @@ export default function ScrapePage() {
 
   async function handleSchedule() {
     if (!scheduleSeed) return;
-    setScheduling(true); setScheduleMsg("");
+    setScheduling(true); setScheduleMsg(""); setScheduleOk(false);
     try {
       const res = await api.pipeline.schedules.create({
         niche: scheduleSeed.niche,
         country: scheduleSeed.country,
         target_leads: maxLeads,
       });
+      setScheduleOk(true);
       setScheduleMsg(
-        `✅ Scheduled — seeded ${res.queries_seeded} cities. Worker will rotate hourly.`
+        `Scheduled — seeded ${res.queries_seeded} cities. Worker will rotate hourly.`
       );
       await loadSchedules();
     } catch (e) {
+      setScheduleOk(false);
       setScheduleMsg((e as Error).message);
     } finally {
       setScheduling(false);
@@ -128,7 +138,9 @@ export default function ScrapePage() {
   return (
     <div className="space-y-6 max-w-3xl">
       <div>
-        <h1 className="text-2xl font-bold text-white">🚀 Scrape &amp; Enrich</h1>
+        <h1 className="flex items-center gap-2 text-2xl font-bold text-white">
+          <Rocket className="text-orange-400" size={24} /> Scrape &amp; Enrich
+        </h1>
         <p className="text-slate-400 text-sm mt-1">
           Google Maps → business leads → emails extracted automatically.
         </p>
@@ -234,7 +246,11 @@ export default function ScrapePage() {
         disabled={running || validRows.length === 0}
         className="w-full py-3 rounded-xl bg-gradient-to-r from-orange-500 to-red-500 hover:from-orange-400 hover:to-red-400 disabled:opacity-40 text-white font-bold text-sm shadow-lg shadow-orange-500/20 transition-all"
       >
-        {running ? "Starting pipeline…" : `🚀  Run — ${validRows.length} search(es) × ${maxLeads} leads${enrich ? " + emails" : ""}`}
+        {running ? "Starting pipeline…" : (
+          <span className="inline-flex items-center gap-2">
+            <Rocket size={16} /> Run — {validRows.length} search(es) × {maxLeads} leads{enrich ? " + emails" : ""}
+          </span>
+        )}
       </button>
 
       {/* ── Recurring schedules ──────────────────────────────── */}
@@ -247,6 +263,7 @@ export default function ScrapePage() {
           back off automatically; fresh ones get prioritized.
         </p>
 
+        {canManageSchedules && (
         <div className="rounded-2xl border border-white/8 bg-white/3 px-5 py-4 flex flex-col md:flex-row md:items-center gap-3">
           <div className="text-sm text-slate-300 flex-1">
             {scheduleSeed ? (
@@ -269,13 +286,20 @@ export default function ScrapePage() {
             {scheduling ? "Scheduling…" : "Schedule recurring"}
           </button>
         </div>
+        )}
+        {!canManageSchedules && (
+          <p className="mb-4 text-xs text-slate-500">
+            Only organization admins can create or pause recurring schedules.
+          </p>
+        )}
 
-        {scheduleMsg && (
-          <div className={`mt-3 rounded-xl px-4 py-3 text-sm ${
-            scheduleMsg.startsWith("✅")
+        {canManageSchedules && scheduleMsg && (
+          <div className={`mt-3 flex items-center gap-2 rounded-xl px-4 py-3 text-sm ${
+            scheduleOk
               ? "bg-green-500/10 border border-green-500/20 text-green-400"
               : "bg-red-500/10 border border-red-500/20 text-red-400"
           }`}>
+            {scheduleOk && <CheckCircle2 size={16} />}
             {scheduleMsg}
           </div>
         )}
@@ -296,7 +320,7 @@ export default function ScrapePage() {
                       : "bg-slate-700 text-slate-400"
                   }`}>{s.status}</span>
                 </div>
-                {s.status === "active" && (
+                {canManageSchedules && s.status === "active" && (
                   <button
                     onClick={() => handleCancel(s.id)}
                     className="text-xs text-slate-400 hover:text-red-400 transition"

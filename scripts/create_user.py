@@ -3,7 +3,7 @@ Create a Supabase auth user from the command line.
 Reads credentials from frontend/.env.local automatically.
 
 Usage:
-    python create_user.py
+    python -m scripts.create_user
 
 Needs SUPABASE_SERVICE_ROLE_KEY in frontend/.env.local to bypass
 email validation. Get it from:
@@ -17,7 +17,7 @@ from pathlib import Path
 import requests
 
 # ── Load frontend/.env.local ─────────────────────────────────
-env_file = Path(__file__).parent / "frontend" / ".env.local"
+env_file = Path(__file__).resolve().parents[1] / "frontend" / ".env.local"
 env: dict[str, str] = {}
 for line in env_file.read_text(encoding="utf-8").splitlines():
     line = line.strip()

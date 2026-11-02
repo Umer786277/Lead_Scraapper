@@ -80,7 +80,7 @@ def _email_score(e):
     return conf + category_bonus + source_bonus
 
 
-def run_pipeline(searches, max_leads=20, headless=True, enrich_emails=True, on_event=None):
+def run_pipeline(searches, max_leads=20, headless=True, enrich_emails=True, on_event=None, org_id=None):
     """
     Run the full pipeline:
       1. For each search → scrape Google Maps listings → insert into `leads`
@@ -108,6 +108,7 @@ def run_pipeline(searches, max_leads=20, headless=True, enrich_emails=True, on_e
     run_id = db.start_run(
         "scrape_and_enrich",
         input_count=len(searches),
+        org_id=org_id,
         metadata={
             "max_leads":      max_leads,
             "headless":       headless,
@@ -121,7 +122,7 @@ def run_pipeline(searches, max_leads=20, headless=True, enrich_emails=True, on_e
     domains_scanned = 0
 
     try:
-        with locks.browser_lock, sync_playwright() as p:
+        with locks.browser_lock_for(org_id), sync_playwright() as p:
             browser = p.chromium.launch(
                 headless=headless,
                 args=[
@@ -183,6 +184,7 @@ def run_pipeline(searches, max_leads=20, headless=True, enrich_emails=True, on_e
 
                     lead_id = db.insert_lead(
                         source="google_maps",
+                        org_id=org_id,
                         run_id=run_id,
                         business_name=name or None,
                         domain=domain or None,
@@ -247,11 +249,20 @@ def run_pipeline(searches, max_leads=20, headless=True, enrich_emails=True, on_e
                         pages_visited=result.get("pages_visited", 0),
                         emails_found=len(result.get("emails", [])),
                         error=result.get("error"),
+                        org_id=org_id,
                     )
 
                     best_email = None
                     snippet = result.get("snippet")
                     has_mx = result.get("has_mx")
+
+                    ai = None
+                    if snippet:
+                        try:
+                            from llm import generate_improvement_note
+                            ai = generate_improvement_note(domain, snippet)
+                        except Exception:
+                            ai = None
 
                     # Batch: all email inserts + lead updates in one connection
                     with db.get_conn() as c:
@@ -259,12 +270,12 @@ def run_pipeline(searches, max_leads=20, headless=True, enrich_emails=True, on_e
                             try:
                                 c.execute(
                                     "INSERT INTO emails "
-                                    "(domain_id, domain, email, source_url, source_type, confidence, "
+                                    "(org_id, domain_id, domain, email, source_url, source_type, confidence, "
                                     " is_role, category, verification_status, extracted_at) "
                                     "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) "
-                                    "ON CONFLICT (domain, email) DO NOTHING",
+                                    "ON CONFLICT (org_id, domain, email) DO NOTHING",
                                     (
-                                        domain_id, domain, e["email"],
+                                        db.org_id_or_default(org_id), domain_id, domain, e["email"],
                                         e.get("source_url"), e.get("source_type"),
                                         e.get("confidence"), int(bool(e.get("is_role"))),
                                         e.get("category"),
@@ -293,6 +304,12 @@ def run_pipeline(searches, max_leads=20, headless=True, enrich_emails=True, on_e
                                         "WHERE id=%s AND (homepage_snippet IS NULL OR homepage_snippet='')",
                                         (snippet, lid),
                                     )
+                                if ai:
+                                    c.execute(
+                                        "UPDATE leads SET improvement_note=%s, lead_line=%s "
+                                        "WHERE id=%s AND (improvement_note IS NULL OR improvement_note='')",
+                                        (ai.get("note") or None, ai.get("lead_line") or None, lid),
+                                    )
                     if best_email:
                         emit("enrich",
                              f"      ✅ {best_email['email']} "
@@ -303,10 +320,10 @@ def run_pipeline(searches, max_leads=20, headless=True, enrich_emails=True, on_e
 
             browser.close()
 
-        db.finish_run(run_id, output_count=len(leads_created), status="completed")
+        db.finish_run(run_id, output_count=len(leads_created), status="completed", org_id=org_id)
         emit("done", f"Completed run #{run_id}")
     except Exception as e:
-        db.finish_run(run_id, output_count=len(leads_created), status="failed")
+        db.finish_run(run_id, output_count=len(leads_created), status="failed", org_id=org_id)
         emit("error", f"❌ Pipeline failed: {e}")
         raise
 

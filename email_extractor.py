@@ -19,9 +19,7 @@ import re
 import sys
 from urllib.parse import urljoin, urlparse
 
-# Streamlit ships Tornado, which on Windows sets WindowsSelectorEventLoopPolicy —
-# and that policy can't spawn subprocesses, which Playwright requires.
-# Force Proactor for any *new* event loops (Tornado's existing loop is unaffected).
+# Playwright requires subprocess support, so use Proactor on Windows.
 if sys.platform == "win32":
     try:
         asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
@@ -38,13 +36,36 @@ from playwright.sync_api import sync_playwright
 
 EMAIL_RE = re.compile(r"[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}")
 
-# Pages to try per domain — ordered by contact relevance.
-# Personal named emails live on team/about pages, so we crawl those too.
+# Pages to try per domain — ordered by contact relevance, with the
+# content-richest pages (homepage, contact, about, services) kept early so
+# they're visited before the high-confidence-email early-stop can kick in.
 CONTACT_PATHS = [
-    "/", "/contact", "/contact-us", "/contact.html",
-    "/about", "/about-us", "/team", "/our-team", "/people",
+    "/", "/contact", "/contact-us", "/about", "/services",
+    "/contact.html", "/about-us", "/services.html",
+    "/team", "/our-team", "/people",
     "/staff", "/leadership", "/management",
 ]
+
+# Subset of the above worth capturing body text from for personalization —
+# these are the pages likely to say something specific about the business
+# (not just a bare contact form). Combined into one multi-section snippet;
+# /about and /about-us share a label so only the first hit counts.
+SNIPPET_PATHS = {"/", "/about", "/about-us", "/services"}
+_SNIPPET_LABELS = {
+    "/":         "HOMEPAGE",
+    "/about":    "ABOUT",
+    "/about-us": "ABOUT",
+    "/services": "SERVICES",
+}
+_SNIPPET_ORDER = ["HOMEPAGE", "ABOUT", "SERVICES"]
+_MAX_SNIPPET_TOTAL = 1200
+
+# Soft-404 guard — some sites return HTTP 200 for a missing page.
+_NOT_FOUND_MARKERS = (
+    "page not found", "404", "page can't be found", "page cant be found",
+    "page could not be found", "we can't find that page", "doesn't exist",
+    "nothing was found at this location",
+)
 
 # Role-based prefixes (flagged separately — good for cold outreach backup,
 # but usually lower reply rate than a named person).
@@ -136,8 +157,9 @@ def _scrape_page(page, url, capture_snippet=False):
     text_emails = set()
     snippet = None
     try:
-        page.goto(url, wait_until="domcontentloaded", timeout=12000)
+        response = page.goto(url, wait_until="domcontentloaded", timeout=12000)
         page.wait_for_timeout(500)
+        is_error_page = bool(response and response.status >= 400)
 
         # mailto: anchors — highest confidence signal
         for a in page.query_selector_all('a[href^="mailto:"]'):
@@ -153,13 +175,19 @@ def _scrape_page(page, url, capture_snippet=False):
         for match in EMAIL_RE.findall(body):
             text_emails.add(match.lower())
 
-        if capture_snippet:
+        if capture_snippet and not is_error_page:
             try:
                 title = (page.title() or "").strip()
             except Exception:
                 title = ""
             cleaned = " ".join((body or "").split())[:400]
-            snippet = (f"{title} | {cleaned}" if title else cleaned).strip() or None
+            # Soft-404 guard: some sites return HTTP 200 for a missing page
+            # (a real one we hit: "Page not found - London Vet Clinic").
+            # Checking only the title + opening text avoids false positives
+            # on legitimate pages that mention "404" deep in unrelated copy.
+            lead_text = f"{title} {cleaned[:150]}".lower()
+            if not any(m in lead_text for m in _NOT_FOUND_MARKERS):
+                snippet = (f"{title} | {cleaned}" if title else cleaned).strip() or None
     except Exception:
         pass
     return mailto_emails, text_emails, snippet
@@ -182,7 +210,7 @@ def extract_from_domain(domain, context):
         "has_mx": None,
         "emails": [],
         "pages_visited": 0,
-        "snippet": None,        # captured from homepage for LLM personalization
+        "snippet": None,        # multi-section site text for LLM personalization
         "error": None,
     }
 
@@ -206,6 +234,7 @@ def extract_from_domain(domain, context):
 
     page = context.new_page()
     found = {}  # email -> best metadata (dedupe, keep highest confidence)
+    snippet_sections = {}  # label -> text, e.g. "ABOUT" -> "..." (first hit per label wins)
 
     def _add(email, url, source_type, confidence):
         if _is_junk(email):
@@ -227,13 +256,13 @@ def extract_from_domain(domain, context):
     try:
         for path in CONTACT_PATHS:
             url = f"https://{domain}{path}"
-            # Capture a snippet on the homepage hit only — that's the most
-            # representative page for personalization.
+            label = _SNIPPET_LABELS.get(path)
+            capture = path in SNIPPET_PATHS and (label not in snippet_sections)
             mailto_emails, text_emails, snippet = _scrape_page(
-                page, url, capture_snippet=(path == "/")
+                page, url, capture_snippet=capture
             )
-            if snippet and not result["snippet"]:
-                result["snippet"] = snippet
+            if snippet and label and label not in snippet_sections:
+                snippet_sections[label] = snippet
             if mailto_emails or text_emails:
                 result["pages_visited"] += 1
 
@@ -262,6 +291,14 @@ def extract_from_domain(domain, context):
     if not found:
         for prefix in PATTERN_GUESSES:
             _add(f"{prefix}@{domain}", None, "pattern_guess", "low")
+
+    if snippet_sections:
+        combined = "\n\n".join(
+            f"{label}: {snippet_sections[label]}"
+            for label in _SNIPPET_ORDER
+            if label in snippet_sections
+        )
+        result["snippet"] = combined[:_MAX_SNIPPET_TOTAL]
 
     result["emails"] = list(found.values())
     return result

@@ -2,9 +2,9 @@
 One-shot migration: SQLite (data/leads.db) → Postgres (DATABASE_URL).
 
 Usage:
-    python migrate_sqlite_to_pg.py                    # do it
-    python migrate_sqlite_to_pg.py --dry-run          # just show counts
-    python migrate_sqlite_to_pg.py --sqlite other.db  # specify source
+    python -m scripts.migrate_sqlite_to_pg                    # do it
+    python -m scripts.migrate_sqlite_to_pg --dry-run          # just show counts
+    python -m scripts.migrate_sqlite_to_pg --sqlite other.db  # specify source
 
 - Safe to re-run: uses ON CONFLICT DO NOTHING.
 - Preserves row IDs so foreign keys remain valid.

@@ -4,13 +4,13 @@ Automation worker — background process driving the email pipeline.
 Jobs (all run independently via APScheduler):
   enrich  (every 30 s): new leads with domains → extract emails → enroll in auto campaign
   send    (every 60 s): process the outreach send queue via SMTP
-  inbox   (every 10 min): IMAP poll for replies → cancel follow-ups
+  inbox   (every 2 min): IMAP poll for replies → cancel follow-ups, react to intents
 
-Run in a separate terminal alongside Streamlit:
+Run as a separate process, or use the API's integrated worker runner:
     pip install apscheduler
     python worker.py
 
-Status is written to worker_state.json and shown in the System page.
+Status is written to worker_state.json and exposed by the API.
 """
 
 import json
@@ -22,9 +22,16 @@ import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-# Shared RLock — serialises ALL Chromium launches (API pipeline + enrich + rotation).
-# Imported from locks.py so api/routers/pipeline.py can share the same object.
-from locks import browser_lock as _browser_lock
+# Windows consoles default to the cp1252 codepage, which can't encode the
+# emoji used in scraper log/print output and crashes the run mid-way when
+# this file is executed standalone (python worker.py).
+for _stream in (sys.stdout, sys.stderr):
+    if hasattr(_stream, "reconfigure"):
+        _stream.reconfigure(encoding="utf-8", errors="replace")
+
+# Shared local lock for the enrich job. Scrape pipelines use per-org distributed
+# locks from locks.py so different organizations can scrape independently.
+from locks import browser_lock as _browser_lock, browser_lock_for
 
 # Throttle DB heartbeat writes — lightweight jobs (send/calls) run every 1-2 min
 # but we only need to persist heartbeat to DB once every 2 min.
@@ -47,16 +54,15 @@ _CHROMIUM_ARGS = [
 ]
 
 # Load .env BEFORE any module that calls os.getenv at import time —
-# otherwise SMTP / IMAP / OPENAI env vars come back empty on first job tick.
+# otherwise SMTP / IMAP / Google AI Studio env vars come back empty on first job tick.
 try:
     from dotenv import load_dotenv
     load_dotenv()
 except ImportError:
     pass
 
-# Windows asyncio fix — must come before any Playwright import.
-# Streamlit's Tornado forces WindowsSelectorEventLoopPolicy which can't
-# spawn subprocesses. Force Proactor so Playwright works here too.
+# Windows asyncio fix — Playwright requires subprocess support, so set this
+# before importing Playwright-dependent modules.
 if sys.platform == "win32":
     import asyncio
     try:
@@ -67,6 +73,7 @@ if sys.platform == "win32":
 from apscheduler.schedulers.blocking import BlockingScheduler
 
 import db
+from coordination import run_scheduled_job
 from outreach import SMTPConfig, process_queue, seed_default_templates
 
 # ── Config ───────────────────────────────────────────────────
@@ -90,8 +97,9 @@ def _now_str():
 
 def _write_state(state: dict, force_db: bool = False):
     global _last_db_heartbeat
+    state_file = Path(state.get("state_file") or STATE_FILE)
     try:
-        STATE_FILE.write_text(json.dumps(state, indent=2), encoding="utf-8")
+        state_file.write_text(json.dumps(state, indent=2), encoding="utf-8")
     except Exception as e:
         log.warning(f"Could not write state file: {e}")
     # Throttle DB heartbeat to once every 2 minutes — lightweight jobs (send, calls)
@@ -138,30 +146,32 @@ def _email_score(e: dict) -> int:
 
 
 # ── Auto-campaign bootstrap ──────────────────────────────────
-def _ensure_auto_campaign() -> tuple[int | None, list]:
+def _ensure_auto_campaign(org_id=None) -> tuple[int | None, list]:
     """
-    Idempotently create the 'Auto Outreach' campaign with 4 steps using the
-    default templates. Returns (campaign_id, steps_list). Each step dict has
+    Idempotently create the per-org 'Auto Outreach' campaign with 4 steps using
+    the default templates. Returns (campaign_id, steps_list). Each step dict has
     keys: step_id, step_number, delay_days, template_id.
     """
-    seed_default_templates()
-    templates = db.list_templates()
+    org = db.org_id_or_default(org_id)
+    seed_default_templates(org_id=org)
+    templates = db.list_templates(org_id=org)
     if not templates:
         log.error("No email templates — cannot create auto campaign")
         return None, []
 
     with db.get_conn() as c:
         row = c.execute(
-            "SELECT id FROM campaigns WHERE name='Auto Outreach' LIMIT 1"
+            "SELECT id FROM campaigns WHERE org_id=%s AND name='Auto Outreach' LIMIT 1",
+            (org,),
         ).fetchone()
 
         if row:
             campaign_id = row["id"]
         else:
             cur = c.execute(
-                "INSERT INTO campaigns (name, status, leads_count, created_at, notes) "
-                "VALUES ('Auto Outreach', 'active', 0, %s, %s) RETURNING id",
-                (db.now(), "Managed by worker.py — do not edit steps manually."),
+                "INSERT INTO campaigns (org_id, name, status, leads_count, created_at, notes) "
+                "VALUES (%s, 'Auto Outreach', 'active', 0, %s, %s) RETURNING id",
+                (org, db.now(), "Managed by worker.py — do not edit steps manually."),
             )
             campaign_id = cur.fetchone()["id"]
             log.info(f"Created auto campaign id={campaign_id}")
@@ -197,7 +207,7 @@ def _ensure_auto_campaign() -> tuple[int | None, list]:
         return campaign_id, [dict(s) for s in existing_steps]
 
 
-def _enroll_lead(lead_id: int, campaign_id: int, steps: list) -> bool:
+def _enroll_lead(lead_id: int, campaign_id: int, steps: list, org_id=None) -> bool:
     """
     Schedule all campaign steps for one lead. Step 1 fires in OUTREACH_DELAY_MIN
     minutes; subsequent steps add their delay_days on top of that anchor.
@@ -214,13 +224,16 @@ def _enroll_lead(lead_id: int, campaign_id: int, steps: list) -> bool:
             return False
 
         lead = c.execute(
-            "SELECT email, status FROM leads WHERE id=%s", (lead_id,)
+            "SELECT org_id, email, status, do_not_contact FROM leads WHERE id=%s", (lead_id,)
         ).fetchone()
         if not lead or not lead["email"]:
             return False
-        if lead["status"] in ("replied", "converted", "dead", "contacted"):
+        if lead["status"] in ("replied", "converted", "dead", "contacted", "snoozed"):
+            return False
+        if lead["do_not_contact"]:
             return False
 
+        org = org_id or lead["org_id"] or db.DEFAULT_ORG_ID
         cumulative = timedelta(0)
         for step in steps:
             if step["step_number"] > 1:
@@ -228,41 +241,28 @@ def _enroll_lead(lead_id: int, campaign_id: int, steps: list) -> bool:
             send_at = (anchor + cumulative).isoformat(timespec="seconds")
             c.execute(
                 "INSERT INTO scheduled_sends "
-                "(campaign_id, step_id, step_number, lead_id, scheduled_at, status) "
-                "VALUES (%s, %s, %s, %s, %s, 'pending')",
-                (campaign_id, step["step_id"], step["step_number"], lead_id, send_at),
+                "(org_id, campaign_id, step_id, step_number, lead_id, scheduled_at, status) "
+                "VALUES (%s, %s, %s, %s, %s, %s, 'pending')",
+                (org, campaign_id, step["step_id"], step["step_number"], lead_id, send_at),
             )
     return True
 
 
-# ── AI improvement note ──────────────────────────────────────
-def _generate_improvement_note(domain: str, snippet: str) -> str | None:
-    """Generate a 1-2 sentence note about business problems we could help with."""
-    api_key = os.getenv("OPENAI_API_KEY", "")
-    if not api_key or not snippet:
+# ── AI improvement note + client-facing lead line ─────────────
+def _generate_improvement_note(domain: str, snippet: str) -> dict | None:
+    """Generate the AI note + lead_line for a domain's snippet.
+
+    One underlying LLM call returns both: the internal prep note
+    (leads.improvement_note) and a client-facing opening line
+    (leads.lead_line) that's safe to drop into outreach copy.
+
+    Delegates to llm.generate_improvement_note (single shared implementation).
+    """
+    if not snippet:
         return None
     try:
-        import requests
-        prompt = (
-            f"Business website: {domain}\n"
-            f"Homepage text: {snippet[:600]}\n\n"
-            "In 1-2 sentences, identify the biggest improvement opportunity for this business "
-            "(e.g. weak online presence, no reviews strategy, poor lead capture, slow follow-up, "
-            "missing contact info). Be specific and actionable. Reply with just the note, no preamble."
-        )
-        resp = requests.post(
-            "https://api.openai.com/v1/chat/completions",
-            headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
-            json={
-                "model": "gpt-4o-mini",
-                "messages": [{"role": "user", "content": prompt}],
-                "max_tokens": 120,
-                "temperature": 0.4,
-            },
-            timeout=15,
-        )
-        resp.raise_for_status()
-        return resp.json()["choices"][0]["message"]["content"].strip()[:500]
+        from llm import generate_improvement_note as _gen
+        return _gen(domain, snippet)
     except Exception as e:
         log.debug(f"AI note failed for {domain}: {e}")
         return None
@@ -278,16 +278,17 @@ def job_enrich(state: dict, campaign_id: int | None, steps: list):
         with db.get_conn() as c:
             rows = c.execute(
                 """
-                SELECT l.domain,
+                SELECT l.org_id, l.domain,
                        ARRAY_AGG(l.id ORDER BY l.id) AS lead_ids
                 FROM leads l
                 WHERE l.status = 'new'
                   AND l.domain IS NOT NULL AND l.domain != ''
                   AND (l.email IS NULL OR l.email = '')
                   AND NOT EXISTS (
-                      SELECT 1 FROM domains d WHERE d.domain = l.domain
+                      SELECT 1 FROM domains d
+                      WHERE d.domain = l.domain AND d.org_id = l.org_id
                   )
-                GROUP BY l.domain
+                GROUP BY l.org_id, l.domain
                 LIMIT %s
                 """,
                 (ENRICH_BATCH,),
@@ -332,10 +333,17 @@ def job_enrich(state: dict, campaign_id: int | None, steps: list):
 
                 context.route("**/*", _block)
 
+                campaigns: dict = {}
                 for row in rows:
+                    org      = row["org_id"]
                     domain   = row["domain"]
                     lead_ids = row["lead_ids"]
-                    log.info(f"enrich: {domain} (leads: {lead_ids})")
+                    log.info(f"enrich: [{org}] {domain} (leads: {lead_ids})")
+
+                    if org not in campaigns:
+                        cid, csteps = _ensure_auto_campaign(org_id=org)
+                        campaigns[org] = (cid, csteps)
+                    org_campaign_id, org_steps = campaigns[org]
 
                     try:
                         extraction = extract_from_domain(domain, context)
@@ -346,7 +354,7 @@ def job_enrich(state: dict, campaign_id: int | None, steps: list):
                             db.insert_domain(
                                 run_id=None, domain=domain, status="failed",
                                 has_mx=None, pages_visited=0, emails_found=0,
-                                error=str(e)[:200],
+                                error=str(e)[:200], org_id=org,
                             )
                         except Exception:
                             pass
@@ -364,12 +372,13 @@ def job_enrich(state: dict, campaign_id: int | None, steps: list):
                         pages_visited=extraction.get("pages_visited", 0),
                         emails_found=len(extraction.get("emails", [])),
                         error=extraction.get("error"),
+                        org_id=org,
                     )
 
                     best_email = None
                     snippet = extraction.get("snippet")
                     has_mx  = extraction.get("has_mx")
-                    improvement_note = _generate_improvement_note(domain, snippet) if snippet else None
+                    ai = _generate_improvement_note(domain, snippet) if snippet else None
 
                     # Batch: all email inserts + lead updates in one connection per domain
                     with db.get_conn() as c:
@@ -377,11 +386,12 @@ def job_enrich(state: dict, campaign_id: int | None, steps: list):
                             try:
                                 c.execute(
                                     "INSERT INTO emails "
-                                    "(domain_id, domain, email, source_url, source_type, "
+                                    "(org_id, domain_id, domain, email, source_url, source_type, "
                                     " confidence, is_role, category, verification_status, extracted_at) "
-                                    "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) "
-                                    "ON CONFLICT (domain, email) DO NOTHING",
+                                    "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) "
+                                    "ON CONFLICT (org_id, domain, email) DO NOTHING",
                                     (
+                                        db.org_id_or_default(org),
                                         domain_id, domain, e["email"],
                                         e.get("source_url"), e.get("source_type"),
                                         e.get("confidence"), int(bool(e.get("is_role"))),
@@ -409,11 +419,11 @@ def job_enrich(state: dict, campaign_id: int | None, steps: list):
                                         "WHERE id=%s AND (homepage_snippet IS NULL OR homepage_snippet='')",
                                         (snippet, lid),
                                     )
-                                if improvement_note:
+                                if ai:
                                     c.execute(
-                                        "UPDATE leads SET improvement_note=%s "
+                                        "UPDATE leads SET improvement_note=%s, lead_line=%s "
                                         "WHERE id=%s AND (improvement_note IS NULL OR improvement_note='')",
-                                        (improvement_note, lid),
+                                        (ai.get("note") or None, ai.get("lead_line") or None, lid),
                                     )
                     if best_email:
                         result["enriched"] += 1
@@ -422,10 +432,10 @@ def job_enrich(state: dict, campaign_id: int | None, steps: list):
                             f"({best_email['confidence']})"
                         )
 
-                        # Enroll each lead in the auto outreach campaign
-                        if campaign_id and steps:
+                        # Enroll each lead in this org's auto outreach campaign
+                        if org_campaign_id and org_steps:
                             for lid in lead_ids:
-                                if _enroll_lead(lid, campaign_id, steps):
+                                if _enroll_lead(lid, org_campaign_id, org_steps, org_id=org):
                                     result["enrolled"] += 1
                     else:
                         log.info(f"enrich: {domain} → no emails found")
@@ -438,28 +448,29 @@ def job_enrich(state: dict, campaign_id: int | None, steps: list):
         log.error(f"enrich job crashed: {e}", exc_info=True)
         result["error"] = str(e)[:300]
 
-    # Phase 2: backfill AI notes for leads that already have a snippet
-    # but never got an improvement_note (no browser needed here).
-    if os.getenv("OPENAI_API_KEY"):
+    # Phase 2: backfill AI notes/lead lines for leads that already have a
+    # snippet but never got them (the note, the client-facing lead_line, or
+    # either — no browser needed here). One LLM call produces both.
+    if os.getenv("GOOGLE_AI_STUDIO_API_KEY"):
         try:
             with db.get_conn() as c:
                 note_rows = c.execute(
                     """
                     SELECT id, domain, homepage_snippet
                     FROM leads
-                    WHERE improvement_note IS NULL
+                    WHERE lead_line IS NULL
                       AND homepage_snippet IS NOT NULL AND homepage_snippet != ''
                     LIMIT 20
                     """,
                 ).fetchall()
             note_count = 0
             for nr in note_rows:
-                note = _generate_improvement_note(nr["domain"] or "", nr["homepage_snippet"])
-                if note:
+                ai = _generate_improvement_note(nr["domain"] or "", nr["homepage_snippet"])
+                if ai:
                     with db.get_conn() as c:
                         c.execute(
-                            "UPDATE leads SET improvement_note=%s WHERE id=%s",
-                            (note, nr["id"]),
+                            "UPDATE leads SET improvement_note=%s, lead_line=%s WHERE id=%s",
+                            (ai.get("note") or None, ai.get("lead_line") or None, nr["id"]),
                         )
                     note_count += 1
             if note_count:
@@ -472,42 +483,94 @@ def job_enrich(state: dict, campaign_id: int | None, steps: list):
     log.info(f"enrich: done {result}")
 
 
-def job_send(state: dict):
-    """Process due scheduled sends."""
-    # Yield to active scraping — no DB/SMTP load while browser is running.
-    _acquired = _browser_lock.acquire(blocking=False)
-    if not _acquired:
-        log.debug("send: scraping active — skipping tick")
-        return
-    _browser_lock.release()
+def _on_send_item(item, outcome, detail):
+    """Outbox/campaign callback - log per-lead outcomes for the live viewer."""
+    lead_id = item.get("lead_id")
+    step = item.get("step_number")
+    who = (f"lead #{lead_id} "
+           f"({item.get('business_name') or item.get('email') or item.get('to_email') or '?'})")
+    suffix = f" step {step}" if step is not None else ""
+    if outcome == "sent":
+        log.info(f"send: {who}{suffix} -> sent")
+    elif outcome == "failed":
+        log.warning(f"send: {who}{suffix} -> FAILED: {detail}")
+    elif outcome == "unknown":
+        log.warning(f"send: {who}{suffix} -> UNKNOWN (not retried): {detail}")
+    elif outcome == "retry":
+        log.info(f"send: {who}{suffix} -> retry scheduled: {detail}")
+    elif outcome == "dead_letter":
+        log.error(f"send: {who}{suffix} -> dead-lettered: {detail}")
+    elif outcome == "circuit_broken":
+        log.error(f"send: {detail}")
+    elif outcome == "no_sender":
+        log.warning(f"send: {detail}")
+    elif outcome == "skipped":
+        log.debug(f"send: {who} -> skipped ({detail})")
+    elif outcome == "deferred":
+        log.debug(f"send: {who} -> deferred ({detail})")
+    elif outcome == "queued":
+        log.info(f"send: {who}{suffix} -> queued ({detail})")
 
+def job_send(state: dict):
+    """Process due scheduled sends.
+
+    Doesn't touch Chromium (just SMTP + an LLM API call for the opener), so —
+    like job_calls below — it doesn't need to yield to _browser_lock. It used
+    to, which meant a tick that happened to land while enrich/rotation held
+    the lock was silently skipped (log.debug, invisible at INFO level) *and*
+    never wrote state["jobs"]["send"], so a missed tick looked identical to
+    "job never ran" for a full 5-minute interval — exactly the bug already
+    fixed once for job_calls (see its docstring).
+    """
     log.info("send: processing queue")
-    result = {"at": _now_str(), "sent": 0, "failed": 0, "skipped": 0,
-              "deferred": 0, "error": None}
+    result = {"at": _now_str(), "queued": 0, "sent": 0, "failed": 0,
+              "skipped": 0, "deferred": 0, "retry": 0, "unknown": 0,
+              "dead_letter": 0,
+              "error": None}
 
     smtp     = SMTPConfig.from_env()
     from_addr = os.getenv("SMTP_FROM") or smtp.username
 
-    if not smtp.host:
-        log.warning("send: SMTP_HOST not configured — skipping")
-        result["error"] = "SMTP not configured (set SMTP_HOST in .env)"
+    if not smtp.host and not db.list_email_accounts():
+        log.warning("send: no SMTP account configured — skipping")
+        result["error"] = ("No sender account configured "
+                           "(add one in Outreach → Accounts or set SMTP_HOST)")
         state["jobs"]["send"] = result
         _write_state(state)
         return
 
     try:
-        summary = process_queue(smtp, from_addr, limit=30)
-        result.update({
-            "sent":     summary["sent"],
-            "failed":   summary["failed"],
-            "skipped":  summary["skipped"],
-            "deferred": summary.get("deferred", 0),
-        })
-        if any(result[k] for k in ("sent", "failed", "skipped", "deferred")):
+        orgs = db.list_active_orgs() or [db.DEFAULT_ORG_ID]
+        for org in orgs:
+            if not smtp.host and not db.list_email_accounts(org_id=org):
+                continue
+            summary = process_queue(smtp, from_addr, limit=30, on_item=_on_send_item,
+                                    org_id=org)
+            for k in ("queued", "sent", "failed", "skipped", "retry", "unknown",
+                      "dead_letter"):
+                result[k] += summary.get(k, 0)
+            result["deferred"] += summary.get("deferred", 0)
+            if summary.get("paused"):
+                result["error"] = summary.get("error", "Outreach paused")
+                log.info(f"send [{org}]: {result['error']}")
+            elif summary.get("limit_reached"):
+                result["error"] = summary["limit_reason"]
+                log.info(f"send [{org}]: {result['error']}")
+            if summary.get("circuit_broken"):
+                result["error"] = summary["circuit_reason"]
+                log.error(f"send [{org}]: circuit breaker tripped — {summary['circuit_reason']}")
+                break
+        if any(result[k] for k in
+               ("queued", "sent", "failed", "skipped", "deferred", "retry",
+                "unknown", "dead_letter")):
             log.info(
-                f"send: sent={result['sent']} "
+                f"send: queued={result['queued']} "
+                f"sent={result['sent']} "
                 f"failed={result['failed']} "
                 f"skipped={result['skipped']} "
+                f"retry={result['retry']} "
+                f"unknown={result['unknown']} "
+                f"dead_letter={result['dead_letter']} "
                 f"deferred={result['deferred']}"
             )
     except Exception as e:
@@ -521,115 +584,157 @@ def job_send(state: dict):
 def job_inbox(state: dict):
     """Poll IMAP for replies. check_inbox() handles status + follow-up cancellation."""
     log.info("inbox: polling")
-    result = {"at": _now_str(), "replies": 0, "error": None}
+    result = {"at": _now_str(), "replies": 0, "accounts": 0, "error": None,
+              "duration_s": 0.0}
+    _t0 = time.perf_counter()
 
     try:
         from inbox import IMAPConfig, check_inbox
-        cfg = IMAPConfig.from_env()
-        if not cfg.ready:
+
+        targets = []
+        for acct in db.list_imap_accounts():
+            cfg = IMAPConfig.from_account(acct)
+            if cfg.ready:
+                targets.append((acct.get("org_id"), cfg, acct.get("id")))
+
+        if not targets:
+            cfg = IMAPConfig.from_env()
+            if cfg.ready:
+                targets.append((None, cfg, None))
+
+        if not targets:
             log.info("inbox: IMAP not configured — skipping")
-            result["error"] = "IMAP not configured (set IMAP_HOST in .env)"
+            result["error"] = ("IMAP not configured "
+                               "(add an email account or set IMAP_HOST in .env)")
             state["jobs"]["inbox"] = result
             _write_state(state)
             return
 
-        replies = check_inbox(cfg, limit=50, mark_seen=True)
-        result["replies"] = len(replies) if replies else 0
-        if replies:
-            log.info(f"inbox: {len(replies)} reply(ies) matched and stored")
+        errors = []
+        for org, cfg, account_id in targets:
+            try:
+                replies = check_inbox(
+                    cfg, limit=50, mark_seen=True,
+                    booking_link=os.getenv("BOOKING_LINK"),
+                    org_id=org,
+                    account_id=account_id,
+                )
+                processing_errors = [
+                    reply for reply in replies if reply.get("error")
+                ]
+                matched_count = sum(
+                    1 for reply in replies
+                    if reply.get("lead_id") is not None and not reply.get("error")
+                )
+                result["replies"] += matched_count
+                result["accounts"] += 1
+                if processing_errors:
+                    errors.append(
+                        f"{org or 'env'}: {len(processing_errors)} inbound "
+                        "message(s) need retry or dead-letter review"
+                    )
+                if replies:
+                    log.info(f"inbox [{org or 'env'}]: "
+                             f"{matched_count} reply(ies) matched and stored")
+            except Exception as e:
+                log.error(f"inbox [{org or 'env'}] crashed: {e}", exc_info=True)
+                errors.append(f"{org or 'env'}: {e}")
+        if errors:
+            result["error"] = "; ".join(errors)[:300]
     except Exception as e:
         log.error(f"inbox job crashed: {e}", exc_info=True)
         result["error"] = str(e)[:300]
 
+    result["duration_s"] = round(time.perf_counter() - _t0, 1)
     state["jobs"]["inbox"] = result
     _write_state(state)
 
 
-# ── Scrape rotation job ──────────────────────────────────────
-def job_scrape_rotation(state: dict):
-    """One tick of saturation-aware city rotation.
-
-    Picks the most-deserving query (never-scraped first, then most-saturated-
-    but-overdue), runs Google Maps scraping for it (no email extraction —
-    the 30s enrich job picks those up), then updates next_run_at via
-    adaptive backoff based on how many leads were actually new.
-    """
-    log.info("rotation: tick")
-    result = {"at": _now_str(), "query": None, "leads_added": 0,
-              "dedup_rate": None, "next_in_hrs": None, "error": None}
+# ── Pending booking replies job ───────────────────────────────
+def job_booking_replies(state: dict):
+    """Queue deferred booking invitations and deliver due outbox rows."""
+    log.info("booking_replies: checking pending")
+    result = {"at": _now_str(), "queued": 0, "sent": 0, "failed": 0,
+              "retry": 0, "unknown": 0, "dead_letter": 0,
+              "error": None, "duration_s": 0.0}
+    _t0 = time.perf_counter()
 
     try:
-        from scrape_planner import (
-            pick_next_query, query_target_leads,
-            record_run_result, count_leads_for,
-        )
-
-        q = pick_next_query()
-        if not q:
-            log.info("rotation: no due queries")
-            state["jobs"]["rotation"] = result
+        booking_link = os.getenv("BOOKING_LINK")
+        if not booking_link:
+            log.info("booking_replies: BOOKING_LINK not configured - skipping")
+            result["error"] = "BOOKING_LINK not configured"
+            state["jobs"]["booking_replies"] = result
             _write_state(state)
             return
 
-        result["query"] = f"{q['niche']} · {q['city']} · {q['country']}"
-        target = query_target_leads(q["niche"], q["country"])
-        log.info(f"rotation: {result['query']} (target={target})")
+        from inbox import drain_pending_replies
+        from outreach import process_outbound_queue
 
-        before = count_leads_for(q["city"], q["country"])
+        smtp = SMTPConfig.from_env()
+        from_addr = os.getenv("SMTP_FROM") or smtp.username
 
-        # Local import — avoids loading Playwright at worker startup.
-        from pipeline import run_pipeline
-        with _browser_lock:
-            run_pipeline(
-                searches=[{
-                    "niche":   q["niche"],
-                    "city":    q["city"],
-                    "country": q["country"],
-                }],
-                max_leads=target,
-                headless=True,
-                enrich_emails=False,    # the 30s enrich job handles emails
-                on_event=lambda kind, msg, **_: None,
+        for org in (db.list_active_orgs() or [db.DEFAULT_ORG_ID]):
+            result["queued"] += drain_pending_replies(
+                None, None, booking_link, limit=10, org_id=org,
             )
+            if not smtp.host and not db.list_email_accounts(org_id=org):
+                continue
+            summary = process_outbound_queue(
+                smtp=smtp if smtp.host else None,
+                from_addr=from_addr if smtp.host else None,
+                limit=10,
+                on_item=_on_send_item,
+                org_id=org,
+            )
+            for k in ("sent", "failed", "retry", "unknown", "dead_letter"):
+                result[k] += summary.get(k, 0)
+            if summary.get("paused") or summary.get("limit_reached"):
+                result["error"] = summary.get("error") or summary.get("limit_reason")
+        if result["queued"] or result["sent"]:
+            log.info(
+                f"booking_replies: queued={result['queued']} sent={result['sent']}"
+            )
+    except Exception as e:
+        log.error(f"booking_replies job crashed: {e}", exc_info=True)
+        result["error"] = str(e)[:300]
 
-        after = count_leads_for(q["city"], q["country"])
-        leads_added = max(0, after - before)
-        info = record_run_result(q["id"], leads_added, target)
+    result["duration_s"] = round(time.perf_counter() - _t0, 1)
+    state["jobs"]["booking_replies"] = result
+    _write_state(state, force_db=True)
 
-        result["leads_added"] = leads_added
-        result["dedup_rate"]  = info["dedup_rate"]
-        result["next_in_hrs"] = info["next_in_hrs"]
-        log.info(
-            f"rotation: {result['query']} → +{leads_added} leads "
-            f"(dedup_rate={info['dedup_rate']}, next in {info['next_in_hrs']}h)"
+def job_scrape_rotation_all(state: dict):
+    """Run one due scrape per organization with independent distributed locks."""
+    from concurrent.futures import ThreadPoolExecutor
+
+    orgs = db.list_active_orgs() or [db.DEFAULT_ORG_ID]
+    configured_workers = int(os.getenv("SCRAPE_WORKER_CONCURRENCY", "2"))
+    if configured_workers < 1:
+        raise ValueError("SCRAPE_WORKER_CONCURRENCY must be at least 1.")
+
+    def run_for_org(org_id):
+        return run_scheduled_job(
+            f"rotation:{org_id}",
+            lambda: job_scrape_rotation(state, org_id=org_id, persist_state=False),
         )
 
-    except Exception as e:
-        log.error(f"rotation job crashed: {e}", exc_info=True)
-        result["error"] = str(e)[:300]
-        # Best-effort: record the error against the query if we got that far
-        try:
-            if "q" in locals() and q:
-                from scrape_planner import record_run_result
-                record_run_result(q["id"], 0, 1, error=str(e))
-        except Exception:
-            pass
-
-    state["jobs"]["rotation"] = result
-    _write_state(state, force_db=True)   # rotation is heavy — always persist its result
+    with ThreadPoolExecutor(max_workers=min(configured_workers, len(orgs))) as executor:
+        list(executor.map(run_for_org, orgs))
+    _write_state(state, force_db=True)
 
 
 def job_calls(state: dict):
-    """Dispatch queued outbound calls via Vapi.ai."""
-    # Yield to active scraping — no DB load while browser is running.
-    _acquired = _browser_lock.acquire(blocking=False)
-    if not _acquired:
-        log.debug("calls: scraping active — skipping tick")
-        return
-    _browser_lock.release()
+    """Dispatch queued outbound calls via Vapi.ai.
 
+    Unlike enrich/send/rotation, this never touches Chromium — it's a plain
+    HTTP POST to Vapi — so it doesn't need to yield to _browser_lock. It used
+    to, which meant it silently starved (via a log.debug skip line, invisible
+    at the app's INFO log level) whenever scraping was active — worse once
+    rotation started ticking every ~8.5 min instead of hourly.
+    """
     log.info("calls: checking queue")
-    result = {"at": _now_str(), "dispatched": 0, "failed": 0, "error": None}
+    result = {"at": _now_str(), "dispatched": 0, "failed": 0, "error": None, "duration_s": 0.0}
+    _t0 = time.perf_counter()
 
     vapi_key = os.getenv("VAPI_API_KEY", "")
     if not vapi_key:
@@ -664,6 +769,8 @@ def job_calls(state: dict):
 
     state["jobs"]["calls"] = result
     _write_state(state)
+    result["duration_s"] = round(time.perf_counter() - _t0, 1)
+    log.info(f"calls: done {result}")
     log.info(f"calls: done {result}")
 
 
@@ -675,12 +782,14 @@ def main():
     state: dict = {
         "pid":              os.getpid(),
         "started_at":       _now_str(),
+        "state_file":       str(STATE_FILE),
+        "process":          "main",
         "auto_campaign_id": None,
         "jobs": {
             "enrich":   {},
             "send":     {},
-            "inbox":    {},
             "rotation": {},
+            "calls":    {},
         },
     }
     _write_state(state)
@@ -695,32 +804,39 @@ def main():
 
     scheduler = BlockingScheduler(timezone="UTC")
     scheduler.add_job(
-        lambda: job_enrich(state, campaign_id, steps),
+        lambda: run_scheduled_job(
+            "enrich", lambda: job_enrich(state, campaign_id, steps)
+        ),
         "interval", minutes=5, id="enrich", max_instances=1,
         next_run_time=now_utc,                           # run immediately on start
+        jitter=30,                                       # de-collide 5-min bursts
     )
     scheduler.add_job(
-        lambda: job_send(state),
+        lambda: run_scheduled_job("send", lambda: job_send(state)),
         "interval", minutes=2, id="send", max_instances=1,
         next_run_time=now_utc + timedelta(seconds=30),   # give enrich a head-start
     )
     scheduler.add_job(
-        lambda: job_inbox(state),
-        "interval", minutes=15, id="inbox", max_instances=1,
-        next_run_time=now_utc + timedelta(minutes=1),
-    )
-    scheduler.add_job(
-        lambda: job_scrape_rotation(state),
+        lambda: run_scheduled_job(
+            "rotation", lambda: job_scrape_rotation_all(state)
+        ),
         "interval", hours=1, id="rotation", max_instances=1,
         next_run_time=now_utc + timedelta(seconds=60),  # first tick after warmup
+    )
+    scheduler.add_job(
+        lambda: run_scheduled_job("calls", lambda: job_calls(state)),
+        "interval", minutes=5, id="calls", max_instances=1,
+        next_run_time=now_utc + timedelta(minutes=1),
+        jitter=30,                                      # de-collide 5-min bursts
     )
 
     log.info(
         "Worker running. Press Ctrl+C to stop.\n"
-        "  enrich    → every 30 s\n"
-        "  send      → every 60 s\n"
-        "  inbox     → every 10 min\n"
-        "  rotation  → every 1 h\n"
+        "  enrich          → every 5 min (browser)\n"
+        "  send            → every 2 min\n"
+        "  rotation        → every 1 h (browser)\n"
+        "  calls           → every 5 min\n"
+        "  (inbox + booking_replies now run in worker_replies.py)\n"
     )
     try:
         scheduler.start()

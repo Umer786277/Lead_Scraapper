@@ -7,7 +7,7 @@ One-shot migration: add homepage_snippet + opener columns to leads.
                      first send. Cached so re-sends never re-pay LLM cost.
 
 Run once:
-    python migrate_add_personalization.py
+    python -m scripts.migrate_add_personalization
 """
 
 import db

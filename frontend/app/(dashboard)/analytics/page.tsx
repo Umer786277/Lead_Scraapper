@@ -1,6 +1,7 @@
 "use client";
 
 import { api } from "@/lib/api";
+import { BarChart3 } from "lucide-react";
 import { useEffect, useState } from "react";
 
 export default function AnalyticsPage() {
@@ -37,7 +38,9 @@ export default function AnalyticsPage() {
   return (
     <div className="space-y-8">
       <div>
-        <h1 className="text-2xl font-bold text-white">📊 Analytics</h1>
+        <h1 className="flex items-center gap-2 text-2xl font-bold text-white">
+          <BarChart3 className="text-indigo-400" size={24} /> Analytics
+        </h1>
         <p className="text-slate-400 text-sm mt-1">Unified numbers across all runs and lead sources.</p>
       </div>
 

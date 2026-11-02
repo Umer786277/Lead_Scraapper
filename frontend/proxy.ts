@@ -32,14 +32,19 @@ export async function proxy(request: NextRequest) {
 
   const { pathname } = request.nextUrl;
   const isAuthRoute = pathname.startsWith("/login") || pathname.startsWith("/signup");
+  const isPublicInvitationRequest =
+    request.method === "POST" &&
+    (pathname === "/api/orgs/invitations/lookup" ||
+      pathname === "/api/orgs/invitations/signup");
 
-  if (!user && !isAuthRoute) {
+  if (!user && !isAuthRoute && !isPublicInvitationRequest) {
     const url = request.nextUrl.clone();
     url.pathname = "/login";
     return NextResponse.redirect(url);
   }
 
-  if (user && isAuthRoute) {
+  const isInvitationLink = request.nextUrl.searchParams.has("invite");
+  if (user && isAuthRoute && !isInvitationLink) {
     const url = request.nextUrl.clone();
     url.pathname = "/";
     return NextResponse.redirect(url);

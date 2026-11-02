@@ -2,7 +2,7 @@
 One-shot migration: add user_id column to multi-tenant tables.
 
 Run once after pulling this branch:
-    python migrate_add_user_id.py
+    python -m scripts.migrate_add_user_id
 
 Safe to run multiple times (ALTER TABLE ... IF NOT EXISTS).
 """

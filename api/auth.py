@@ -4,10 +4,11 @@ JWT verification for Supabase-issued tokens.
 Supports both signing schemes:
   • HS256 (legacy "JWT Secret" mode)  — uses SUPABASE_JWT_SECRET
   • ES256 / RS256 (new asymmetric mode, default for new projects)
-    — fetches the public JWKS from the project's /auth/v1/.well-known/jwks.json
+    — fetches the public JWKS from the configured project's
+      /auth/v1/.well-known/jwks.json
 
-The JWKS URL is derived from the token's `iss` claim, so no extra config is
-needed beyond the user already being able to authenticate against Supabase.
+Asymmetric tokens require SUPABASE_URL to pin issuer verification to the
+configured Supabase project.
 """
 
 import os
@@ -18,6 +19,9 @@ from fastapi import HTTPException, status
 from jose import JWTError, jwt
 
 SUPABASE_JWT_SECRET = os.getenv("SUPABASE_JWT_SECRET", "")
+SUPABASE_URL = (
+    os.getenv("SUPABASE_URL") or os.getenv("NEXT_PUBLIC_SUPABASE_URL") or ""
+).rstrip("/")
 
 _jwks_cache: dict[str, tuple[float, dict]] = {}
 _JWKS_TTL = 3600  # seconds
@@ -42,6 +46,14 @@ def _verify_asymmetric(token: str, alg: str, kid: str | None) -> dict:
     issuer = unverified.get("iss")
     if not issuer:
         raise HTTPException(401, "Token missing iss claim.")
+    if not SUPABASE_URL:
+        raise HTTPException(
+            500,
+            "SUPABASE_URL must be configured to verify asymmetric Supabase tokens.",
+        )
+    expected_issuer = f"{SUPABASE_URL}/auth/v1"
+    if issuer.rstrip("/") != expected_issuer:
+        raise HTTPException(401, "Token issuer does not match the configured Supabase project.")
     try:
         jwks = _fetch_jwks(issuer)
     except requests.RequestException as e:

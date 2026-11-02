@@ -17,6 +17,13 @@ from pathlib import Path
 # Make the project root importable (db.py, pipeline.py, etc. live there)
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+# Windows consoles default to the cp1252 codepage, which can't encode the
+# emoji used in scraper log/print output and crashes the pipeline mid-run.
+# Force UTF-8 so any print()/log line survives regardless of host console.
+for _stream in (sys.stdout, sys.stderr):
+    if hasattr(_stream, "reconfigure"):
+        _stream.reconfigure(encoding="utf-8", errors="replace")
+
 # ── Playwright browser path ───────────────────────────────────
 # Store browsers inside the project directory so they persist on Render.
 # Must be set before any Playwright import.
@@ -27,7 +34,7 @@ import db
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from api.routers import analytics, calls, leads, outreach, pipeline, system
+from api.routers import analytics, calls, leads, orgs, outreach, pipeline, system
 
 log = logging.getLogger("startup")
 
@@ -44,6 +51,7 @@ _origins = list({
     "http://localhost:3000",
     "http://127.0.0.1:3000",
     "http://192.168.100.164:3000",
+    "http://192.168.1.4:3000",
     *_extra,
 })
 app.add_middleware(
@@ -62,6 +70,7 @@ app.include_router(pipeline.router,  prefix="/api/pipeline",  tags=["pipeline"])
 app.include_router(outreach.router,  prefix="/api/outreach",  tags=["outreach"])
 app.include_router(system.router,    prefix="/api/system",    tags=["system"])
 app.include_router(calls.router,     prefix="/api/calls",     tags=["calls"])
+app.include_router(orgs.router,      prefix="/api/orgs",      tags=["orgs"])
 
 
 def _ensure_playwright():
@@ -91,16 +100,17 @@ def startup():
     except Exception as e:
         log.error(f"DB init failed (API still starting): {e}")
     import threading
-    from api import worker_runner
-    # Run both in background so FastAPI responds immediately and passes Render's health check
     threading.Thread(target=_ensure_playwright, daemon=True).start()
-    threading.Thread(target=worker_runner.start, daemon=True).start()
+    if os.getenv("RUN_WORKER_IN_API", "").strip().lower() in {"1", "true", "yes"}:
+        from api import worker_runner
+        threading.Thread(target=worker_runner.start, daemon=True).start()
 
 
 @app.on_event("shutdown")
 def shutdown():
-    from api import worker_runner
-    worker_runner.stop()
+    if os.getenv("RUN_WORKER_IN_API", "").strip().lower() in {"1", "true", "yes"}:
+        from api import worker_runner
+        worker_runner.stop()
 
 
 @app.api_route("/", methods=["GET", "HEAD"], tags=["health"])

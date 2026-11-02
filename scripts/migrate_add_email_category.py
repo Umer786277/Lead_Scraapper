@@ -5,7 +5,7 @@ Categories: personal_named | personal | role | pattern_guess
 Used to score reply-likelihood when picking the "best" email per domain.
 
 Run once:
-    python migrate_add_email_category.py
+    python -m scripts.migrate_add_email_category
 
 Safe to run multiple times.
 """

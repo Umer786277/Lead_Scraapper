@@ -10,7 +10,7 @@ from concurrent.futures import ThreadPoolExecutor
 from typing import List, Optional
 
 import db
-from api.deps import get_user_id
+from api.deps import get_org_id, get_user_id, require_org_admin
 from fastapi import APIRouter, BackgroundTasks, Depends
 from pydantic import BaseModel
 
@@ -31,7 +31,7 @@ class PipelineRunRequest(BaseModel):
     enrich_emails: bool = True
 
 
-def _run_sync(searches, max_leads, headless, enrich_emails, user_id, run_id):
+def _run_sync(searches, max_leads, headless, enrich_emails, org_id, run_id):
     """Executed in thread pool — calls the synchronous pipeline."""
     import logging
     log = logging.getLogger("pipeline")
@@ -48,21 +48,13 @@ def _run_sync(searches, max_leads, headless, enrich_emails, user_id, run_id):
             headless=headless,
             enrich_emails=enrich_emails,
             on_event=on_event,
+            org_id=org_id,
         )
         log.info(f"pipeline run_id={run_id} finished: {result}")
-        # Tag all leads from this run with the user_id
-        try:
-            with db.get_conn() as c:
-                c.execute(
-                    "UPDATE leads SET user_id=%s WHERE run_id=%s AND user_id IS NULL",
-                    (user_id, result.get("run_id", run_id)),
-                )
-        except Exception as e:
-            log.warning(f"pipeline: could not tag leads with user_id: {e}")
     except Exception as e:
         log.error(f"pipeline run_id={run_id} FAILED: {e}", exc_info=True)
         try:
-            db.finish_run(run_id, output_count=0, status="failed")
+            db.finish_run(run_id, output_count=0, status="failed", org_id=org_id)
         except Exception:
             pass
 
@@ -72,6 +64,7 @@ async def run_pipeline_endpoint(
     body: PipelineRunRequest,
     background_tasks: BackgroundTasks,
     user_id: str = Depends(get_user_id),
+    org_id: str = Depends(get_org_id),
 ):
     searches = [s.model_dump() for s in body.searches]
 
@@ -79,12 +72,14 @@ async def run_pipeline_endpoint(
     run_id = db.start_run(
         "scrape_and_enrich",
         input_count=len(searches),
+        org_id=org_id,
         metadata={
             "max_leads":     body.max_leads,
             "headless":      body.headless,
             "enrich_emails": body.enrich_emails,
             "searches":      searches,
             "user_id":       user_id,
+            "org_id":        org_id,
         },
     )
 
@@ -97,7 +92,7 @@ async def run_pipeline_endpoint(
         body.max_leads,
         body.headless,
         body.enrich_emails,
-        user_id,
+        org_id,
         run_id,
     )
 
@@ -105,8 +100,8 @@ async def run_pipeline_endpoint(
 
 
 @router.get("/runs")
-def list_runs(limit: int = 20, user_id: str = Depends(get_user_id)):
-    return db.runs_summary(limit=limit)
+def list_runs(limit: int = 20, org_id: str = Depends(get_org_id)):
+    return db.runs_summary(limit=limit, org_id=org_id)
 
 
 # ── Recurring schedules (saturation-aware city rotation) ─────
@@ -117,13 +112,15 @@ class ScheduleCreate(BaseModel):
 
 
 @router.post("/schedules")
-def create_schedule(body: ScheduleCreate, user_id: str = Depends(get_user_id)):
+def create_schedule(body: ScheduleCreate, user_id: str = Depends(get_user_id),
+                    org_id: str = Depends(require_org_admin)):
     """Register a recurring scrape. Worker rotates through the country's
     cities, picking the most-deserving one each hour."""
     from scrape_planner import register_schedule
     try:
-        return register_schedule(
+        result = register_schedule(
             user_id=user_id,
+            org_id=org_id,
             niche=body.niche,
             country=body.country,
             target_leads=body.target_leads,
@@ -132,15 +129,23 @@ def create_schedule(body: ScheduleCreate, user_id: str = Depends(get_user_id)):
         from fastapi import HTTPException
         raise HTTPException(status_code=400, detail=str(e))
 
+    # Don't make the first city wait for the next hourly tick (up to 59 min
+    # of idle time) — kick the rotation job off now. It re-arms for its
+    # normal 1h cadence after this run, same as any other tick.
+    from api import worker_runner
+    worker_runner.trigger_job("rotation")
+
+    return result
+
 
 @router.get("/schedules")
-def list_schedules(user_id: str = Depends(get_user_id)):
+def list_schedules(org_id: str = Depends(get_org_id)):
     from scrape_planner import list_schedules as _list
-    return _list(user_id)
+    return _list(org_id=org_id)
 
 
 @router.delete("/schedules/{schedule_id}")
-def cancel_schedule(schedule_id: int, user_id: str = Depends(get_user_id)):
+def cancel_schedule(schedule_id: int, org_id: str = Depends(require_org_admin)):
     from scrape_planner import cancel_schedule as _cancel
-    ok = _cancel(user_id, schedule_id)
+    ok = _cancel(org_id, schedule_id)
     return {"ok": ok}

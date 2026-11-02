@@ -13,7 +13,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "LeadFlow",
+  title: "Missa",
   description: "AI-powered lead generation and outreach platform",
 };
 
