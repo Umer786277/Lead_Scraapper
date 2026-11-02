@@ -6,7 +6,7 @@ templates, edits to DEFAULT_TEMPLATES never reach the DB. This script does
 the missing piece: match by name and overwrite subject/body.
 
 Run after editing DEFAULT_TEMPLATES:
-    python refresh_templates.py
+    python -m scripts.refresh_templates
 
 Templates not present in the DB are inserted.
 Templates the user added manually (no matching name) are left alone.

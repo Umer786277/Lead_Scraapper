@@ -1,5 +1,6 @@
 # Never bake credentials into the image
 .env
+.env.*
 *.env
 
 # Local outputs
@@ -7,6 +8,19 @@ data/
 *.xlsx
 *.csv
 worker_state.json
+.playwright/
+*.log
+*.lock
+_probe.py
+_smoke_*.py
+_flag.err
+_flag.out
+_wr.err
+_wr.out
+frontend/.env.local
+frontend/node_modules/
+frontend/.next/
+frontend/tsconfig.tsbuildinfo
 
 # Python cache
 __pycache__/

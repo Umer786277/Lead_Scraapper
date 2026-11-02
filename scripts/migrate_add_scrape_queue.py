@@ -12,7 +12,7 @@ Two tables:
                      hourly tick.
 
 Run once:
-    python migrate_add_scrape_queue.py
+    python -m scripts.migrate_add_scrape_queue
 """
 
 import db

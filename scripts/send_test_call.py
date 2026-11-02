@@ -6,7 +6,7 @@ Only works with a US number while VAPI_PHONE_NUMBER_ID is a free Vapi number
 (no international calling on free numbers).
 
 Usage:
-    python test_call.py +15551234567
+    python -m scripts.send_test_call +15551234567
 """
 
 import sys
@@ -19,7 +19,7 @@ from voice_caller import dispatch_call
 
 if __name__ == "__main__":
     if len(sys.argv) != 2:
-        print("Usage: python test_call.py +1XXXXXXXXXX")
+        print("Usage: python -m scripts.send_test_call +1XXXXXXXXXX")
         sys.exit(1)
 
     test_lead = {

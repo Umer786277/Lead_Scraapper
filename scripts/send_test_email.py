@@ -4,7 +4,7 @@ One-off manual test for email outreach — sends a single real email using the
 never touches real lead data.
 
 Usage:
-    python test_email.py you@example.com
+    python -m scripts.send_test_email you@example.com
 """
 
 import sys
@@ -19,7 +19,7 @@ from outreach import DEFAULT_TEMPLATES, render
 
 if __name__ == "__main__":
     if len(sys.argv) != 2:
-        print("Usage: python test_email.py you@example.com")
+        print("Usage: python -m scripts.send_test_email you@example.com")
         sys.exit(1)
 
     to_addr = sys.argv[1]

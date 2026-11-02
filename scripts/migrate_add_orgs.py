@@ -2,7 +2,7 @@
 One-shot migration: organizations + memberships + org_id backfill.
 
 Run once after pulling this branch:
-    python migrate_add_orgs.py
+    python -m scripts.migrate_add_orgs
 
 `db.init_db()` creates the org tables, adds every `org_id` column (with
 DEFAULT so existing rows auto-backfill), grants existing data to the default

@@ -6,7 +6,7 @@ business's homepage (e.g., "Owner: Sarah Smith", "Dr. John Patel"). Used
 as the first fallback for {{first_name}} in email templates.
 
 Run once:
-    python migrate_add_contact_name.py
+    python -m scripts.migrate_add_contact_name
 """
 
 import db
