@@ -642,6 +642,25 @@ def _deliver_outbound(item, smtp=None, from_addr=None, reply_to=None,
 
     if source in ("campaign", "send_now") and lead_id:
         lead = db.get_lead(lead_id, org_id=org_id) or {}
+        stop_status = lead.get("status")
+        if lead.get("do_not_contact") or stop_status in (
+            "replied", "converted", "dead", "snoozed",
+        ):
+            reason = (
+                "do_not_contact" if lead.get("do_not_contact")
+                else f"lead status: {stop_status}"
+            )
+            db.mark_outbound_failed(item["id"], "skipped", reason)
+            if send_id:
+                db.mark_send(send_id, "skipped", error=reason, org_id=org_id)
+            if lead_id:
+                db.log_event(
+                    lead_id=lead_id, event_type="skipped",
+                    campaign_id=item.get("campaign_id"),
+                    subject=item.get("subject"), note=reason,
+                    org_id=org_id,
+                )
+            return "skipped", reason, False
         lead = ensure_opener(lead)
         item["subject"] = render(item["subject"], lead)
         item["body"] = render(item["body"], lead)

@@ -43,7 +43,6 @@ class CampaignScriptSetApiTests(unittest.TestCase):
             name="Alternatives",
             scripts=_scripts(step_count=2),
         )
-
         self.assertEqual(len(body.scripts), 2)
         self.assertEqual(len(body.scripts[0].steps), 2)
 
@@ -72,6 +71,31 @@ class CampaignScriptSetApiTests(unittest.TestCase):
                 ],
             )
 
+    def test_script_set_validates_shared_follow_up_delays(self):
+        body = outreach_api.CampaignScriptSetBody(
+            name="Timed variants",
+            scripts=_scripts(step_count=3),
+            step_delays=[0, 2, 5],
+        )
+        self.assertEqual(body.step_delays, [0, 2, 5])
+
+        with self.assertRaises(ValidationError):
+            outreach_api.CampaignScriptSetBody(
+                name="Missing delay",
+                scripts=_scripts(step_count=2),
+                step_delays=[0],
+            )
+        with self.assertRaises(ValidationError):
+            outreach_api.CampaignScriptSetBody(
+                name="Delayed initial email",
+                scripts=_scripts(step_count=2),
+                step_delays=[1, 3],
+            )
+
+        self.assertEqual(db._validated_script_delays(None, 4), [0, 3, 3, 3])
+        with self.assertRaises(ValueError):
+            db._validated_script_delays([0, 366], 2)
+
     def test_script_step_rejects_whitespace_only_subject_or_body(self):
         with self.assertRaises(ValidationError):
             outreach_api.CampaignScriptStepBody(subject="  ", body="Body")
@@ -95,6 +119,28 @@ class CampaignScriptSetApiTests(unittest.TestCase):
 
         self.assertEqual(result, {"id": 99})
         self.assertEqual(create.call_args.kwargs["script_set_id"], 23)
+
+    def test_campaign_can_use_script_set_without_a_saved_sequence(self):
+        body = outreach_api.CampaignBody(
+            name="Four-step automation",
+            lead_ids=[1, 2],
+            script_set_id=23,
+        )
+        with patch.object(
+            outreach_api.db, "create_campaign", return_value=101,
+        ) as create:
+            result = outreach_api.create_campaign(body, org_id="org-1")
+
+        self.assertEqual(result, {"id": 101})
+        create.assert_called_once_with(
+            "Four-step automation",
+            [],
+            [1, 2],
+            notes=None,
+            org_id="org-1",
+            sequence_id=None,
+            script_set_id=23,
+        )
 
     def test_organization_script_selection_setting_is_shared(self):
         with patch.object(

@@ -68,6 +68,19 @@ class SendHistoryTests(unittest.TestCase):
         self.assertIn("WHEN m.status='retry' THEN 'pending'", query)
         self.assertIn("WHEN m.status='suppressed' THEN 'skipped'", query)
 
+    def test_expired_unknown_outbound_cannot_be_released_to_retry(self):
+        connection = Mock()
+        connection.execute.return_value.fetchone.return_value = None
+        context = MagicMock()
+        context.__enter__.return_value = connection
+
+        with patch.object(db, "get_conn", return_value=context):
+            with self.assertRaisesRegex(RuntimeError, "no longer sending"):
+                db.release_outbound_claim_to_retry(12, "late error", "2026-11-03T00:00:00Z")
+
+        query = connection.execute.call_args.args[0]
+        self.assertIn("WHERE id=%s AND status='sending' RETURNING status", query)
+
 
 if __name__ == "__main__":
     unittest.main()

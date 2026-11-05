@@ -2,7 +2,7 @@
 FastAPI entry point.
 
 Run locally:
-    uvicorn api.main:app --reload --port 8000
+    uvicorn api.main:app --reload --host 0.0.0.0 --port 8000
 
 Production (Render):
     uvicorn api.main:app --host 0.0.0.0 --port $PORT
@@ -30,6 +30,24 @@ for _stream in (sys.stdout, sys.stderr):
 _PLAYWRIGHT_DIR = Path(__file__).resolve().parent.parent / ".playwright"
 os.environ.setdefault("PLAYWRIGHT_BROWSERS_PATH", str(_PLAYWRIGHT_DIR))
 
+# ── Console logging ───────────────────────────────────────────
+# worker_runner only attaches an in-memory buffer; without a stream handler
+# the pipeline's INFO events never reach the uvicorn console.
+_root_logger = logging.getLogger()
+_root_logger.setLevel(logging.INFO)
+if not any(
+    isinstance(h, logging.StreamHandler) and not isinstance(h, logging.FileHandler)
+    for h in _root_logger.handlers
+):
+    _stream_handler = logging.StreamHandler()
+    _stream_handler.setFormatter(
+        logging.Formatter(
+            "%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+            datefmt="%H:%M:%S",
+        )
+    )
+    _root_logger.addHandler(_stream_handler)
+
 import db
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -50,8 +68,7 @@ _extra = [o.strip() for o in os.getenv("CORS_ORIGINS", "").split(",") if o.strip
 _origins = list({
     "http://localhost:3000",
     "http://127.0.0.1:3000",
-    "http://192.168.100.164:3000",
-    "http://192.168.1.4:3000",
+    "http://192.168.1.28:3000",
     *_extra,
 })
 app.add_middleware(
@@ -76,10 +93,20 @@ app.include_router(orgs.router,      prefix="/api/orgs",      tags=["orgs"])
 def _ensure_playwright():
     """Install Chromium browser binary if not present. Runs once at startup."""
     browsers_dir = Path(os.environ["PLAYWRIGHT_BROWSERS_PATH"])
-    existing = list(browsers_dir.glob("chromium*/chrome-linux64/chrome")) + \
-               list(browsers_dir.glob("chromium*/chrome-headless-shell-linux64/chrome-headless-shell"))
+    # INSTALLATION_COMPLETE exists on Windows, Linux and macOS installs alike.
+    # Checking platform-specific executable names only broke on Windows, where
+    # the old chrome-linux64 glob never matched and every startup tried to
+    # reinstall Chromium inside the uvicorn-reload watched directory.
+    existing = list(browsers_dir.glob("chromium*/INSTALLATION_COMPLETE"))
     if existing:
-        log.info(f"Playwright Chromium found at {existing[0]}")
+        log.info(f"Playwright Chromium found at {existing[0].parent}")
+        return
+    if "--reload" in sys.argv:
+        log.warning(
+            f"Playwright Chromium not found in {browsers_dir}. "
+            "Skipping auto-install while uvicorn --reload is active; run "
+            "'playwright install chromium' manually."
+        )
         return
     log.info(f"Playwright Chromium not found in {browsers_dir} — installing now...")
     result = subprocess.run(

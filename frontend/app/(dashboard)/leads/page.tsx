@@ -20,6 +20,21 @@ import Pagination from "@/components/Pagination";
 const PAGE_SIZE = 50;
 
 type Bucket = "all" | "call" | "email" | "pending" | "none";
+function eligibleCampaignScriptSets(scriptSets: CampaignScriptSet[]) {
+  const fourStepSets = scriptSets.filter((scriptSet) =>
+    scriptSet.scripts.length > 0 &&
+    scriptSet.scripts.every((script) => script.steps.length === 4) &&
+    scriptSet.step_delays.length === 4 &&
+    scriptSet.step_delays[0] === 0,
+  );
+  const expectedDelays = fourStepSets[0]?.step_delays;
+  return expectedDelays
+    ? fourStepSets.filter((scriptSet) =>
+      scriptSet.step_delays.every((delay, index) => delay === expectedDelays[index]),
+    )
+    : [];
+}
+
 const BUCKETS: { key: Bucket; label: string; icon: LucideIcon; color: string }[] = [
   { key: "call",    label: "Cold Calling",       icon: Phone,   color: "text-green-400  border-green-500/30  bg-green-500/5" },
   { key: "email",   label: "Email Outreach",      icon: Mail,   color: "text-indigo-400 border-indigo-500/30 bg-indigo-500/5" },
@@ -94,12 +109,13 @@ function LeadsContent() {
   const [bulkMsg, setBulkMsg] = useState<string | null>(null);
   const [bulkBusy, setBulkBusy] = useState(false);
   const [builderOpen, setBuilderOpen] = useState(false);
-  const [sequences, setSequences] = useState<EmailSequence[]>([]);
-  const [selectedSequenceId, setSelectedSequenceId] = useState<number | "">("");
+  const [campaignStyle, setCampaignStyle] =
+    useState<"template_sequences" | "script_set">("template_sequences");
   const [scriptSets, setScriptSets] = useState<CampaignScriptSet[]>([]);
-  const [scriptSelectionMode, setScriptSelectionMode] =
+  const [organizationScriptMode, setOrganizationScriptMode] =
     useState<ScriptSelectionMode>("sequential");
-  const [selectedScriptSetId, setSelectedScriptSetId] = useState<number | "">("");
+  const [campaignSequences, setCampaignSequences] = useState<EmailSequence[]>([]);
+  const [selectedSequenceIds, setSelectedSequenceIds] = useState<number[]>([]);
   const [builderName, setBuilderName] = useState("");
   const [sendScriptDialogOpen, setSendScriptDialogOpen] = useState(false);
   const [sendScriptTemplates, setSendScriptTemplates] = useState<EmailTemplate[]>([]);
@@ -233,20 +249,20 @@ function LeadsContent() {
   async function openBuilder() {
     setBulkMsg(null);
     try {
-      const [savedSequences, savedScriptSets, scriptSettings] = await Promise.all([
+      const [sequences, savedScriptSets, scriptSettings] = await Promise.all([
         api.outreach.sequences(),
         api.outreach.scriptSets(),
         api.outreach.scriptSelectionSettings(),
       ]);
-      setSequences(savedSequences);
+      setCampaignSequences(sequences);
       setScriptSets(savedScriptSets);
-      setScriptSelectionMode(scriptSettings.mode);
-      if (!savedSequences.length) {
-        setBulkMsg("Create a sequence on the Outreach page before starting a campaign.");
+      setOrganizationScriptMode(scriptSettings.mode);
+      if (!sequences.length && !eligibleCampaignScriptSets(savedScriptSets).length) {
+        setBulkMsg("Create a four-step sequence or campaign automation on the Outreach page before starting a campaign.");
         return;
       }
-      setSelectedSequenceId(savedSequences[0].id);
-      setSelectedScriptSetId("");
+      setCampaignStyle(sequences.length ? "template_sequences" : "script_set");
+      setSelectedSequenceIds([]);
     } catch (e) {
       setError((e as Error).message);
       return;
@@ -361,37 +377,37 @@ function LeadsContent() {
       setBulkMsg("Give the campaign a name.");
       return;
     }
-    if (selectedSequenceId === "") {
-      setBulkMsg("Choose a sequence for this campaign.");
+    if (
+      campaignStyle === "template_sequences" &&
+      !selectedSequenceIds.length
+    ) {
+      setBulkMsg("Choose at least one four-step template sequence.");
       return;
     }
-    const scriptSet = scriptSets.find((item) => item.id === selectedScriptSetId);
-    const selectedSequence = sequences.find(
-      (item) => item.id === selectedSequenceId,
-    );
-    if (
-      scriptSet &&
-      selectedSequence &&
-      scriptSet.scripts.some(
-        (script) => script.steps.length !== selectedSequence.steps.length,
-      )
-    ) {
-      setBulkMsg(
-        "Every script variant must match the selected sequence's number of steps. Update the script set on the Outreach page.",
-      );
+    const availableScriptSets = eligibleCampaignScriptSets(scriptSets);
+    if (campaignStyle === "script_set" && !availableScriptSets.length) {
+      setBulkMsg("No eligible four-step campaign automations with matching delays are available.");
       return;
     }
     setBulkBusy(true);
     setBulkMsg(null);
     try {
-      const res = await api.outreach.createCampaign({
+      const campaign = {
         name: builderName.trim(),
         lead_ids: selected,
-        sequence_id: selectedSequenceId,
-        ...(selectedScriptSetId !== ""
-          ? { script_set_id: selectedScriptSetId }
-          : {}),
-      });
+      };
+      let res: { id: number };
+      if (campaignStyle === "template_sequences") {
+        res = await api.outreach.createCampaign({
+          ...campaign,
+          template_sequence_ids: selectedSequenceIds,
+        });
+      } else {
+        res = await api.outreach.createCampaign({
+          ...campaign,
+          script_set_ids: availableScriptSets.map((scriptSet) => scriptSet.id),
+        });
+      }
       setBulkMsg(`Campaign #${res.id} created with ${selected.length} lead(s).`);
       setBuilderOpen(false);
       setSelected([]);
@@ -403,12 +419,26 @@ function LeadsContent() {
     }
   }
 
-  const selectedScriptSet = scriptSets.find(
-    (item) => item.id === selectedScriptSetId,
+  const selectedSequences = campaignSequences.filter((sequence) =>
+    selectedSequenceIds.includes(sequence.id),
   );
-  const selectedCampaignSequence = sequences.find(
-    (item) => item.id === selectedSequenceId,
-  );
+  const availableScriptSets = eligibleCampaignScriptSets(scriptSets);
+  const selectedDelays = selectedSequences[0]?.steps.map((step) => step.delay_days);
+  const sequenceIsSelectable = (sequence: EmailSequence) =>
+    sequence.steps.length === 4 &&
+    sequence.steps.every((step, index) => step.step_number === index + 1) &&
+    sequence.steps[0].delay_days === 0;
+  const sequenceDelaysMatch = (sequence: EmailSequence) =>
+    !selectedDelays ||
+    (sequence.steps.length === selectedDelays.length &&
+      sequence.steps.every((step, index) => step.delay_days === selectedDelays[index]));
+  function toggleCampaignSequence(sequence: EmailSequence) {
+    setSelectedSequenceIds((current) =>
+      current.includes(sequence.id)
+        ? current.filter((id) => id !== sequence.id)
+        : [...current, sequence.id],
+    );
+  }
   const activeBucket = BUCKETS.find((b) => b.key === bucket)!
 
   return (
@@ -751,7 +781,7 @@ function LeadsContent() {
               <div>
                 <p className="text-xs text-slate-500 mb-0.5">New campaign</p>
                 <h3 className="text-base font-semibold text-white">
-                  Add {selected.length} selected lead(s) to a sequence
+                  Add {selected.length} selected lead(s) to a campaign
                 </h3>
               </div>
               <button onClick={() => setBuilderOpen(false)} className="text-slate-400 hover:text-white text-xl leading-none">×</button>
@@ -765,60 +795,112 @@ function LeadsContent() {
               className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-2.5 text-sm text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/40"
             />
 
-            <label className="block text-xs text-slate-400">
-              Sequence
-              <select
-                value={selectedSequenceId}
-                onChange={(e) => setSelectedSequenceId(Number(e.target.value))}
-                className="mt-1 w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:outline-none [&>option]:bg-[#1a1d2e]"
-              >
-                {sequences.map((sequence) => (
-                  <option key={sequence.id} value={sequence.id}>{sequence.name}</option>
-                ))}
-              </select>
-            </label>
-            <label className="block text-xs text-slate-400">
-              Campaign script variants (optional)
-              <select
-                value={selectedScriptSetId}
-                onChange={(e) => setSelectedScriptSetId(
-                  e.target.value ? Number(e.target.value) : "",
-                )}
-                className="mt-1 w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:outline-none [&>option]:bg-[#1a1d2e]"
-              >
-                <option value="">Use the selected sequence&apos;s scripts</option>
-                {scriptSets.map((scriptSet) => (
-                  <option key={scriptSet.id} value={scriptSet.id}>
-                    {scriptSet.name}
-                  </option>
-                ))}
-              </select>
-              {selectedScriptSet && (
-                <span className="mt-1 block text-slate-500">
-                  {selectedScriptSet.scripts.length} variants; assigned {scriptSelectionMode === "sequential"
-                    ? "in order"
-                    : "at random"} using the organization-wide setting. The sequence&apos;s existing follow-up delays are retained.
-                </span>
-              )}
-              {selectedScriptSet && selectedCampaignSequence &&
-                selectedScriptSet.scripts.some((script) => (
-                  script.steps.length !== selectedCampaignSequence.steps.length
-                )) && (
-                  <span className="mt-1 block text-amber-300">
-                    This set&apos;s variants must have the same number of steps as the selected sequence.
+            {eligibleCampaignScriptSets(scriptSets).length > 0 && campaignSequences.length > 0 && (
+              <label className="block text-xs text-slate-400">
+                Campaign content
+                <select
+                  value={campaignStyle}
+                  onChange={(e) => setCampaignStyle(
+                    e.target.value as "template_sequences" | "script_set",
+                  )}
+                  className="mt-1 w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:outline-none [&>option]:bg-[#1a1d2e]"
+                >
+                  <option value="template_sequences">Saved four-step sequences</option>
+                  <option value="script_set">Automatic script bundles</option>
+                </select>
+              </label>
+            )}
+            {campaignStyle === "template_sequences" ? (
+              <>
+                <p className="text-xs text-slate-400">
+                  Organization assignment mode:{" "}
+                  <span className="text-slate-200">
+                    {organizationScriptMode === "sequential"
+                      ? "Sequential (round-robin)"
+                      : "Random (shuffled cycle)"}
                   </span>
+                  . Change this in Outreach settings.
+                </p>
+                <fieldset className="space-y-2">
+                  <legend className="text-xs text-slate-400">
+                    Four-step template sequences
+                  </legend>
+                  {campaignSequences.map((sequence) => {
+                    const checked = selectedSequenceIds.includes(sequence.id);
+                    const selectable = sequenceIsSelectable(sequence);
+                    const delaysMatch = sequenceDelaysMatch(sequence);
+                    return (
+                      <label
+                        key={sequence.id}
+                        className={`flex items-start gap-3 rounded-xl border p-3 ${
+                          !selectable || !delaysMatch
+                            ? "border-white/5 bg-white/2 opacity-50"
+                            : checked
+                              ? "border-indigo-500/40 bg-indigo-500/10"
+                              : "border-white/8 bg-white/3"
+                        }`}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          disabled={!selectable || (!checked && !delaysMatch)}
+                          onChange={() => toggleCampaignSequence(sequence)}
+                          className="mt-0.5 accent-indigo-500"
+                        />
+                        <span className="min-w-0">
+                          <span className="block text-sm text-white">{sequence.name}</span>
+                          <span className="mt-1 block text-xs text-slate-500">
+                            {sequence.steps.length === 4
+                              ? `Initial + follow-ups after ${sequence.steps.slice(1).map((step) => `${step.delay_days}d`).join(", ")}`
+                              : "Must contain exactly four ordered steps, starting at day 0"}
+                          </span>
+                          {!selectable && (
+                            <span className="mt-1 block text-xs text-amber-300">
+                              This sequence is not eligible for campaign selection.
+                            </span>
+                          )}
+                          {selectable && !delaysMatch && (
+                            <span className="mt-1 block text-xs text-amber-300">
+                              Selected sequences must share the same follow-up delays.
+                            </span>
+                          )}
+                        </span>
+                      </label>
+                    );
+                  })}
+                </fieldset>
+                {selectedSequences.length > 0 && (
+                  <p className="text-xs text-slate-500">
+                    Each enrolled lead receives one sequence at enrollment. Its saved copy is used for all four steps; later template edits affect only future enrollments.
+                  </p>
                 )}
-            </label>
-            {sequences.find((sequence) => sequence.id === selectedSequenceId) && (
-              <ol className="space-y-1 rounded-xl border border-white/8 bg-white/3 p-3">
-                {sequences.find((sequence) => sequence.id === selectedSequenceId)?.steps.map((step) => (
-                  <li key={step.step_number} className="text-xs text-slate-400">
-                    {step.step_number === 1
-                      ? `Initial email: ${step.template_name}`
-                      : `Follow-up ${step.step_number - 1}: ${step.template_name}, ${step.delay_days} days after previous`}
-                  </li>
-                ))}
-              </ol>
+              </>
+            ) : (
+              <>
+                <div className="space-y-2 rounded-xl border border-white/8 bg-white/3 p-3">
+                  <p className="text-xs text-slate-400">
+                    All eligible four-step templates are assigned automatically using the organization setting:{" "}
+                    <span className="text-slate-200">
+                      {organizationScriptMode === "sequential"
+                        ? "Sequential (round-robin)"
+                        : "Random (shuffled cycle)"}
+                    </span>
+                    .
+                  </p>
+                  {availableScriptSets.map((scriptSet) => (
+                    <div key={scriptSet.id} className="text-xs text-slate-500">
+                      <span className="text-slate-300">{scriptSet.name}</span>
+                      {" — "}
+                      {scriptSet.scripts.length} four-step template bundle(s)
+                    </div>
+                  ))}
+                  {availableScriptSets.length < scriptSets.length && (
+                    <p className="text-xs text-amber-300">
+                      Some automations are excluded because they do not have four steps or matching delays.
+                    </p>
+                  )}
+                </div>
+              </>
             )}
             <p className="text-xs text-slate-500">
               Replies, unsubscribes, bounces, and suppressed recipients stop pending follow-ups.

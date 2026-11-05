@@ -125,6 +125,11 @@ export interface EmailAccount {
   smtp_port: number;
   smtp_user: string | null;
   smtp_use_tls: boolean;
+  imap_host: string | null;
+  imap_port: number;
+  imap_user: string | null;
+  imap_mailbox: string;
+  has_imap_password: boolean;
   daily_limit: number;
   hourly_limit: number;
   warmup_started_at: string | null;
@@ -170,6 +175,18 @@ export interface EmailSequenceInput {
   steps: { template_id: number; delay_days: number }[];
 }
 
+export interface CampaignTemplateOption {
+  sequence_id: number;
+  name: string;
+  step_delays: number[];
+}
+
+export interface CampaignTemplateOptions {
+  campaign_id: number;
+  selection_mode: ScriptSelectionMode;
+  options: CampaignTemplateOption[];
+}
+
 export interface CampaignScriptStep {
   subject: string;
   body: string;
@@ -184,6 +201,7 @@ export interface CampaignScriptSet {
   id: number;
   name: string;
   scripts: CampaignScriptVariant[];
+  step_delays: number[];
   created_at: string;
   updated_at: string;
 }
@@ -191,6 +209,7 @@ export interface CampaignScriptSet {
 export interface CampaignScriptSetInput {
   name: string;
   scripts: CampaignScriptVariant[];
+  step_delays: number[];
 }
 
 export type ScriptSelectionMode = "sequential" | "random";
@@ -256,6 +275,7 @@ export interface ThreadItem {
   country: string | null;
   lead_status: string;
   pending_drafts: number;
+  inbound_count: number;
   last_inbound_subject: string | null;
   last_inbound_body: string | null;
   last_inbound_from: string | null;
@@ -336,6 +356,13 @@ export const api = {
   },
 
   pipeline: {
+    locationCountries: () =>
+      apiFetch<{ countries: string[] }>("/api/pipeline/locations/countries"),
+    locationCities: (country: string) =>
+      apiFetch<{ cities: string[] }>("/api/pipeline/locations/cities", {
+        method: "POST",
+        body: JSON.stringify({ country }),
+      }),
     run: (body: {
       searches: { niche: string; city: string; country: string }[];
       max_leads?: number;
@@ -346,7 +373,28 @@ export const api = {
         method: "POST",
         body: JSON.stringify(body),
       }),
-    runs: () => apiFetch("/api/pipeline/runs"),
+    runs: () =>
+      apiFetch<
+        {
+          id: number;
+          run_type: string;
+          status: string;
+          started_at: string | null;
+          finished_at: string | null;
+          input_count: number;
+          output_count: number;
+        }[]
+      >("/api/pipeline/runs"),
+    runEvents: (runId: number) =>
+      apiFetch<{
+        run_id: number;
+        status: string;
+        input_count: number;
+        output_count: number;
+        started_at: string | null;
+        finished_at: string | null;
+        lines: string[];
+      }>(`/api/pipeline/runs/${runId}/events`),
     schedules: {
       list: () =>
         apiFetch<
@@ -399,6 +447,11 @@ export const api = {
         `/api/outreach/accounts/${id}/test`,
         { method: "POST" }
       ),
+    testImapAccount: (id: number) =>
+      apiFetch<{ imap_ok: boolean; mailbox: string }>(
+        `/api/outreach/accounts/${id}/test-imap`,
+        { method: "POST" }
+      ),
     sendTestEmail: (id: number, body: { to_email: string; template_id: number }) =>
       apiFetch<{ ok: boolean; message_id: string }>(
         `/api/outreach/accounts/${id}/send-test`,
@@ -433,6 +486,23 @@ export const api = {
       apiFetch<{ ok: boolean }>(`/api/outreach/sequences/${id}`, {
         method: "DELETE",
       }),
+    campaignTemplateOptions: (id: number) =>
+      apiFetch<CampaignTemplateOptions>(
+        `/api/outreach/campaigns/${id}/template-options`
+      ),
+    updateCampaignTemplateOptions: (
+      id: number,
+      body: { template_sequence_ids: number[] }
+    ) =>
+      apiFetch<{ ok: boolean }>(
+        `/api/outreach/campaigns/${id}/template-options`,
+        { method: "PUT", body: JSON.stringify(body) }
+      ),
+    enrollCampaignLeads: (id: number, leadIds: number[]) =>
+      apiFetch<{ enrolled_ids: number[]; skipped_ids: number[] }>(
+        `/api/outreach/campaigns/${id}/enroll`,
+        { method: "POST", body: JSON.stringify({ lead_ids: leadIds }) }
+      ),
     scriptSets: () =>
       apiFetch<CampaignScriptSet[]>("/api/outreach/script-sets"),
     scriptSelectionSettings: () =>
@@ -503,6 +573,8 @@ export const api = {
       lead_ids: number[];
       sequence_id?: number;
       script_set_id?: number;
+      script_set_ids?: number[];
+      template_sequence_ids?: number[];
       steps?: { template_id: number; delay_days: number }[];
       notes?: string;
     }) =>
@@ -519,10 +591,11 @@ export const api = {
     threads: {
       inbox: (limit = 100) =>
         apiFetch<ThreadItem[]>(`/api/outreach/threads/inbox?limit=${limit}`),
-      list: (intent?: string, limit = 100) =>
-        apiFetch<ThreadItem[]>(
-          `/api/outreach/threads${intent ? `?intent=${encodeURIComponent(intent)}` : ""}&limit=${limit}`
-        ),
+      list: (intent?: string, limit = 100) => {
+        const params = new URLSearchParams({ limit: String(limit) });
+        if (intent) params.set("intent", intent);
+        return apiFetch<ThreadItem[]>(`/api/outreach/threads?${params.toString()}`);
+      },
       get: (id: number) =>
         apiFetch<{
           thread: Record<string, unknown>;

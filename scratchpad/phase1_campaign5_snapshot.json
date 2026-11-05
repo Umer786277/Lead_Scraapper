@@ -1,0 +1,1977 @@
+{
+  "generated_at": "2026-11-03T17:08:35.331706+00:00",
+  "campaign": [
+    {
+      "id": 5,
+      "org_id": "cca42a19-4f6e-43ef-b285-ed00c12b8640",
+      "name": "Auto Outreach",
+      "status": "active",
+      "leads_count": 0
+    }
+  ],
+  "scheduled_counts": [
+    {
+      "status": "queued",
+      "step_number": 1,
+      "n": 7
+    },
+    {
+      "status": "sent",
+      "step_number": 1,
+      "n": 34
+    },
+    {
+      "status": "pending",
+      "step_number": 2,
+      "n": 41
+    },
+    {
+      "status": "pending",
+      "step_number": 3,
+      "n": 41
+    },
+    {
+      "status": "pending",
+      "step_number": 4,
+      "n": 41
+    }
+  ],
+  "step1_queued": [
+    {
+      "send_id": 1527,
+      "lead_id": 994,
+      "business_name": "Pinot & Picasso Liverpool - Sip and Paint",
+      "email": "info@pinotandpicasso.uk",
+      "step_number": 1,
+      "status": "queued",
+      "scheduled_at": "2026-11-03T09:00:00",
+      "claimed_at": null
+    },
+    {
+      "send_id": 1523,
+      "lead_id": 998,
+      "business_name": "PartyZone Liverpool",
+      "email": "info@partyzoneliverpool.co.uk",
+      "step_number": 1,
+      "status": "queued",
+      "scheduled_at": "2026-11-03T09:00:00",
+      "claimed_at": null
+    },
+    {
+      "send_id": 1539,
+      "lead_id": 999,
+      "business_name": "Ivy Events",
+      "email": "info@sweetpeaandivy.co.uk",
+      "step_number": 1,
+      "status": "queued",
+      "scheduled_at": "2026-11-03T09:00:00",
+      "claimed_at": null
+    },
+    {
+      "send_id": 1511,
+      "lead_id": 1004,
+      "business_name": "Murder Weekends",
+      "email": "geri@murder.co.uk",
+      "step_number": 1,
+      "status": "queued",
+      "scheduled_at": "2026-11-03T09:00:00",
+      "claimed_at": null
+    },
+    {
+      "send_id": 1543,
+      "lead_id": 1009,
+      "business_name": "The Festive Group",
+      "email": "info@thefestivegroup.com",
+      "step_number": 1,
+      "status": "queued",
+      "scheduled_at": "2026-11-03T09:00:00",
+      "claimed_at": null
+    },
+    {
+      "send_id": 1535,
+      "lead_id": 1010,
+      "business_name": "Spartacus Bubble Soccer",
+      "email": "hi@spartacusbubblesoccer.co.uk",
+      "step_number": 1,
+      "status": "queued",
+      "scheduled_at": "2026-11-03T09:00:00",
+      "claimed_at": null
+    },
+    {
+      "send_id": 1531,
+      "lead_id": 1011,
+      "business_name": "Sean Coyle Golf Events",
+      "email": "info@seancoylegolfevents.com",
+      "step_number": 1,
+      "status": "queued",
+      "scheduled_at": "2026-11-03T09:00:00",
+      "claimed_at": null
+    }
+  ],
+  "step1_sent": [
+    {
+      "send_id": 1479,
+      "lead_id": 971,
+      "business_name": "Diamond Life Events",
+      "email": "info@diamondlifeevents.co.uk",
+      "step_number": 1,
+      "status": "sent",
+      "scheduled_at": "2026-11-03T09:00:00",
+      "sent_at": "2026-11-03T16:31:14"
+    },
+    {
+      "send_id": 1495,
+      "lead_id": 977,
+      "business_name": "Flirtina Events - North West",
+      "email": "info@flirtinaevents.co.uk",
+      "step_number": 1,
+      "status": "sent",
+      "scheduled_at": "2026-11-03T09:00:00",
+      "sent_at": "2026-11-03T16:34:13"
+    },
+    {
+      "send_id": 1467,
+      "lead_id": 989,
+      "business_name": "Academy Entertainments Group",
+      "email": "office@academyentertainments.com",
+      "step_number": 1,
+      "status": "sent",
+      "scheduled_at": "2026-11-03T09:00:00",
+      "sent_at": "2026-11-03T10:49:17"
+    },
+    {
+      "send_id": 1503,
+      "lead_id": 991,
+      "business_name": "Happy Days Events Co",
+      "email": "info@happydayseventsco.co.uk",
+      "step_number": 1,
+      "status": "sent",
+      "scheduled_at": "2026-11-03T09:00:00",
+      "sent_at": "2026-11-03T16:37:14"
+    },
+    {
+      "send_id": 1483,
+      "lead_id": 996,
+      "business_name": "Corinthian Grand Liverpool",
+      "email": "info@dtliverpool.co.uk",
+      "step_number": 1,
+      "status": "sent",
+      "scheduled_at": "2026-11-03T09:00:00",
+      "sent_at": "2026-11-03T16:32:13"
+    },
+    {
+      "send_id": 1475,
+      "lead_id": 997,
+      "business_name": "CoverStar Experiences",
+      "email": "bookings@coverstarexperiences.co.uk",
+      "step_number": 1,
+      "status": "sent",
+      "scheduled_at": "2026-11-03T09:00:00",
+      "sent_at": "2026-11-03T16:30:14"
+    },
+    {
+      "send_id": 1499,
+      "lead_id": 1000,
+      "business_name": "Fun Casino Royale",
+      "email": "info@funcasino-royale.co.uk",
+      "step_number": 1,
+      "status": "sent",
+      "scheduled_at": "2026-11-03T09:00:00",
+      "sent_at": "2026-11-03T16:36:13"
+    },
+    {
+      "send_id": 1471,
+      "lead_id": 1001,
+      "business_name": "Aigburth Peoples Hall",
+      "email": "info@aigburthpeopleshall.co.uk",
+      "step_number": 1,
+      "status": "sent",
+      "scheduled_at": "2026-11-03T09:00:00",
+      "sent_at": "2026-11-03T16:29:14"
+    },
+    {
+      "send_id": 1491,
+      "lead_id": 1003,
+      "business_name": "Exhibition Centre Liverpool",
+      "email": "customerservice@lexliverpool.com",
+      "step_number": 1,
+      "status": "sent",
+      "scheduled_at": "2026-11-03T09:00:00",
+      "sent_at": "2026-11-03T16:35:15"
+    },
+    {
+      "send_id": 1519,
+      "lead_id": 1005,
+      "business_name": "Opus Events",
+      "email": "info@opus-events.co.uk",
+      "step_number": 1,
+      "status": "sent",
+      "scheduled_at": "2026-11-03T09:00:00",
+      "sent_at": "2026-11-03T16:38:13"
+    },
+    {
+      "send_id": 1515,
+      "lead_id": 1006,
+      "business_name": "OH ME OH MY",
+      "email": "info@ohmeohmyliverpool.co.uk",
+      "step_number": 1,
+      "status": "sent",
+      "scheduled_at": "2026-11-03T09:00:00",
+      "sent_at": "2026-11-03T17:05:15"
+    },
+    {
+      "send_id": 1487,
+      "lead_id": 1007,
+      "business_name": "Events Design Company Limited",
+      "email": "info@eventdesign.co",
+      "step_number": 1,
+      "status": "sent",
+      "scheduled_at": "2026-11-03T09:00:00",
+      "sent_at": "2026-11-03T16:33:14"
+    },
+    {
+      "send_id": 1507,
+      "lead_id": 1008,
+      "business_name": "Liverpool Wedding Car Hire",
+      "email": "enquiries@liverpoolweddingcarhire.com",
+      "step_number": 1,
+      "status": "sent",
+      "scheduled_at": "2026-11-03T09:00:00",
+      "sent_at": "2026-11-03T17:06:13"
+    },
+    {
+      "send_id": 1551,
+      "lead_id": 1012,
+      "business_name": "The Bentley Liverpool",
+      "email": "info@bentleyliverpool.co.uk",
+      "step_number": 1,
+      "status": "sent",
+      "scheduled_at": "2026-11-03T09:00:00",
+      "sent_at": "2026-11-03T17:03:15"
+    },
+    {
+      "send_id": 1555,
+      "lead_id": 1013,
+      "business_name": "Liverpool Naval Club",
+      "email": "info@liverpoolnavalclub.co.uk",
+      "step_number": 1,
+      "status": "sent",
+      "scheduled_at": "2026-11-03T09:00:00",
+      "sent_at": "2026-11-03T17:04:13"
+    },
+    {
+      "send_id": 1547,
+      "lead_id": 1014,
+      "business_name": "Bacchus Wine Tasting",
+      "email": "info@bacchuswinetasting.co.uk",
+      "step_number": 1,
+      "status": "sent",
+      "scheduled_at": "2026-11-03T09:00:00",
+      "sent_at": "2026-11-03T17:02:13"
+    },
+    {
+      "send_id": 1563,
+      "lead_id": 1015,
+      "business_name": "Brener Construction, Inc. @ Apartment Renovation NYC",
+      "email": "info@brenerconstruction.com",
+      "step_number": 1,
+      "status": "sent",
+      "scheduled_at": "2026-10-31T19:44:42",
+      "sent_at": "2026-11-02T17:22:03"
+    },
+    {
+      "send_id": 1579,
+      "lead_id": 1016,
+      "business_name": "Grandeur Hills Group | General Contractor NYC",
+      "email": "info@grandeurhillsgroup.com",
+      "step_number": 1,
+      "status": "sent",
+      "scheduled_at": "2026-10-31T19:47:17",
+      "sent_at": "2026-11-02T17:22:39"
+    },
+    {
+      "send_id": 1587,
+      "lead_id": 1017,
+      "business_name": "NY Built Construction",
+      "email": "info@nybuilt.com",
+      "step_number": 1,
+      "status": "sent",
+      "scheduled_at": "2026-10-31T19:49:27",
+      "sent_at": "2026-11-02T17:22:57"
+    },
+    {
+      "send_id": 1575,
+      "lead_id": 1018,
+      "business_name": "General Contractor NYC",
+      "email": "info@generalcontractornyc.net",
+      "step_number": 1,
+      "status": "sent",
+      "scheduled_at": "2026-10-31T19:46:47",
+      "sent_at": "2026-11-02T17:22:30"
+    },
+    {
+      "send_id": 1591,
+      "lead_id": 1019,
+      "business_name": "NYC Skyline Construction Corp",
+      "email": "nycskylineconstruction@gmail.com",
+      "step_number": 1,
+      "status": "sent",
+      "scheduled_at": "2026-10-31T19:49:56",
+      "sent_at": "2026-11-02T17:23:05"
+    },
+    {
+      "send_id": 1595,
+      "lead_id": 1020,
+      "business_name": "Renaissance General Contracting of NYC",
+      "email": "info@renaissancegeneralcontracting.com",
+      "step_number": 1,
+      "status": "sent",
+      "scheduled_at": "2026-10-31T19:50:01",
+      "sent_at": "2026-11-02T17:23:14"
+    },
+    {
+      "send_id": 1571,
+      "lead_id": 1023,
+      "business_name": "Corniel Construction",
+      "email": "waldy@cornielconstruction.com",
+      "step_number": 1,
+      "status": "sent",
+      "scheduled_at": "2026-10-31T19:45:56",
+      "sent_at": "2026-11-02T17:22:21"
+    },
+    {
+      "send_id": 1567,
+      "lead_id": 1027,
+      "business_name": "Ark Construction NY",
+      "email": "arkconstructionny@gmail.com",
+      "step_number": 1,
+      "status": "sent",
+      "scheduled_at": "2026-10-31T19:45:12",
+      "sent_at": "2026-11-02T17:22:12"
+    },
+    {
+      "send_id": 1559,
+      "lead_id": 1028,
+      "business_name": "4T NYC CONSTRUCTION INC",
+      "email": "4tnyc.construction@gmail.com",
+      "step_number": 1,
+      "status": "sent",
+      "scheduled_at": "2026-10-31T19:43:18",
+      "sent_at": "2026-11-02T17:21:54"
+    },
+    {
+      "send_id": 1583,
+      "lead_id": 1030,
+      "business_name": "L B General Construction Inc",
+      "email": "info@lbgeneralconstruction.com",
+      "step_number": 1,
+      "status": "sent",
+      "scheduled_at": "2026-10-31T19:49:08",
+      "sent_at": "2026-11-02T17:22:48"
+    },
+    {
+      "send_id": 1611,
+      "lead_id": 1039,
+      "business_name": "Ally Construction Contractors",
+      "email": "info@allyrenovationsnyc.com",
+      "step_number": 1,
+      "status": "sent",
+      "scheduled_at": "2026-10-31T19:54:35",
+      "sent_at": "2026-11-02T17:23:50"
+    },
+    {
+      "send_id": 1619,
+      "lead_id": 1042,
+      "business_name": "A to Z Renovations NYC",
+      "email": "info@atozrenovationsny.com",
+      "step_number": 1,
+      "status": "sent",
+      "scheduled_at": "2026-10-31T19:56:02",
+      "sent_at": "2026-11-02T17:23:59"
+    },
+    {
+      "send_id": 1599,
+      "lead_id": 1052,
+      "business_name": "Ahmed Construction NYC Inc",
+      "email": "ahmedconstruction.nyc@gmail.com",
+      "step_number": 1,
+      "status": "sent",
+      "scheduled_at": "2026-10-31T19:53:19",
+      "sent_at": "2026-11-02T17:23:23"
+    },
+    {
+      "send_id": 1651,
+      "lead_id": 1056,
+      "business_name": "NYC 84 Commercial & Residential Contractor New York",
+      "email": "info@citylocal101.com",
+      "step_number": 1,
+      "status": "sent",
+      "scheduled_at": "2026-10-31T20:05:49",
+      "sent_at": "2026-11-02T17:24:09"
+    },
+    {
+      "send_id": 1607,
+      "lead_id": 1058,
+      "business_name": "Alliance General Construction Corp",
+      "email": "alliancegconstruction@gmail.com",
+      "step_number": 1,
+      "status": "sent",
+      "scheduled_at": "2026-10-31T19:53:46",
+      "sent_at": "2026-11-02T17:23:41"
+    },
+    {
+      "send_id": 1603,
+      "lead_id": 1062,
+      "business_name": "Ajrin Construction Inc.",
+      "email": "info@ajrinconstruction.com",
+      "step_number": 1,
+      "status": "sent",
+      "scheduled_at": "2026-10-31T19:53:25",
+      "sent_at": "2026-11-02T17:23:32"
+    },
+    {
+      "send_id": 1659,
+      "lead_id": 1068,
+      "business_name": "D&R NYC Construction Services",
+      "email": "info@dandrnyc.com",
+      "step_number": 1,
+      "status": "sent",
+      "scheduled_at": "2026-10-31T20:06:05",
+      "sent_at": "2026-11-02T17:24:18"
+    },
+    {
+      "send_id": 1667,
+      "lead_id": 1070,
+      "business_name": "Gjana Construction",
+      "email": "info@gjanaconstruction.com",
+      "step_number": 1,
+      "status": "sent",
+      "scheduled_at": "2026-10-31T20:07:34",
+      "sent_at": "2026-11-02T17:24:28"
+    }
+  ],
+  "pending_followups_of_sent_leads": [
+    {
+      "send_id": 1480,
+      "lead_id": 971,
+      "business_name": "Diamond Life Events",
+      "email": "info@diamondlifeevents.co.uk",
+      "step_number": 2,
+      "status": "pending",
+      "scheduled_at": "2026-11-06T16:31:14"
+    },
+    {
+      "send_id": 1481,
+      "lead_id": 971,
+      "business_name": "Diamond Life Events",
+      "email": "info@diamondlifeevents.co.uk",
+      "step_number": 3,
+      "status": "pending",
+      "scheduled_at": "2026-11-10T19:00:15"
+    },
+    {
+      "send_id": 1482,
+      "lead_id": 971,
+      "business_name": "Diamond Life Events",
+      "email": "info@diamondlifeevents.co.uk",
+      "step_number": 4,
+      "status": "pending",
+      "scheduled_at": "2026-11-24T19:00:15"
+    },
+    {
+      "send_id": 1496,
+      "lead_id": 977,
+      "business_name": "Flirtina Events - North West",
+      "email": "info@flirtinaevents.co.uk",
+      "step_number": 2,
+      "status": "pending",
+      "scheduled_at": "2026-11-06T16:34:13"
+    },
+    {
+      "send_id": 1497,
+      "lead_id": 977,
+      "business_name": "Flirtina Events - North West",
+      "email": "info@flirtinaevents.co.uk",
+      "step_number": 3,
+      "status": "pending",
+      "scheduled_at": "2026-11-10T19:02:23"
+    },
+    {
+      "send_id": 1498,
+      "lead_id": 977,
+      "business_name": "Flirtina Events - North West",
+      "email": "info@flirtinaevents.co.uk",
+      "step_number": 4,
+      "status": "pending",
+      "scheduled_at": "2026-11-24T19:02:23"
+    },
+    {
+      "send_id": 1468,
+      "lead_id": 989,
+      "business_name": "Academy Entertainments Group",
+      "email": "office@academyentertainments.com",
+      "step_number": 2,
+      "status": "pending",
+      "scheduled_at": "2026-11-03T18:58:28"
+    },
+    {
+      "send_id": 1469,
+      "lead_id": 989,
+      "business_name": "Academy Entertainments Group",
+      "email": "office@academyentertainments.com",
+      "step_number": 3,
+      "status": "pending",
+      "scheduled_at": "2026-11-10T18:58:28"
+    },
+    {
+      "send_id": 1470,
+      "lead_id": 989,
+      "business_name": "Academy Entertainments Group",
+      "email": "office@academyentertainments.com",
+      "step_number": 4,
+      "status": "pending",
+      "scheduled_at": "2026-11-24T18:58:28"
+    },
+    {
+      "send_id": 1504,
+      "lead_id": 991,
+      "business_name": "Happy Days Events Co",
+      "email": "info@happydayseventsco.co.uk",
+      "step_number": 2,
+      "status": "pending",
+      "scheduled_at": "2026-11-06T16:37:14"
+    },
+    {
+      "send_id": 1505,
+      "lead_id": 991,
+      "business_name": "Happy Days Events Co",
+      "email": "info@happydayseventsco.co.uk",
+      "step_number": 3,
+      "status": "pending",
+      "scheduled_at": "2026-11-10T19:04:25"
+    },
+    {
+      "send_id": 1506,
+      "lead_id": 991,
+      "business_name": "Happy Days Events Co",
+      "email": "info@happydayseventsco.co.uk",
+      "step_number": 4,
+      "status": "pending",
+      "scheduled_at": "2026-11-24T19:04:25"
+    },
+    {
+      "send_id": 1484,
+      "lead_id": 996,
+      "business_name": "Corinthian Grand Liverpool",
+      "email": "info@dtliverpool.co.uk",
+      "step_number": 2,
+      "status": "pending",
+      "scheduled_at": "2026-11-06T16:32:13"
+    },
+    {
+      "send_id": 1485,
+      "lead_id": 996,
+      "business_name": "Corinthian Grand Liverpool",
+      "email": "info@dtliverpool.co.uk",
+      "step_number": 3,
+      "status": "pending",
+      "scheduled_at": "2026-11-10T19:01:10"
+    },
+    {
+      "send_id": 1486,
+      "lead_id": 996,
+      "business_name": "Corinthian Grand Liverpool",
+      "email": "info@dtliverpool.co.uk",
+      "step_number": 4,
+      "status": "pending",
+      "scheduled_at": "2026-11-24T19:01:10"
+    },
+    {
+      "send_id": 1476,
+      "lead_id": 997,
+      "business_name": "CoverStar Experiences",
+      "email": "bookings@coverstarexperiences.co.uk",
+      "step_number": 2,
+      "status": "pending",
+      "scheduled_at": "2026-11-06T16:30:14"
+    },
+    {
+      "send_id": 1477,
+      "lead_id": 997,
+      "business_name": "CoverStar Experiences",
+      "email": "bookings@coverstarexperiences.co.uk",
+      "step_number": 3,
+      "status": "pending",
+      "scheduled_at": "2026-11-10T18:59:57"
+    },
+    {
+      "send_id": 1478,
+      "lead_id": 997,
+      "business_name": "CoverStar Experiences",
+      "email": "bookings@coverstarexperiences.co.uk",
+      "step_number": 4,
+      "status": "pending",
+      "scheduled_at": "2026-11-24T18:59:57"
+    },
+    {
+      "send_id": 1500,
+      "lead_id": 1000,
+      "business_name": "Fun Casino Royale",
+      "email": "info@funcasino-royale.co.uk",
+      "step_number": 2,
+      "status": "pending",
+      "scheduled_at": "2026-11-06T16:36:13"
+    },
+    {
+      "send_id": 1501,
+      "lead_id": 1000,
+      "business_name": "Fun Casino Royale",
+      "email": "info@funcasino-royale.co.uk",
+      "step_number": 3,
+      "status": "pending",
+      "scheduled_at": "2026-11-10T19:04:07"
+    },
+    {
+      "send_id": 1502,
+      "lead_id": 1000,
+      "business_name": "Fun Casino Royale",
+      "email": "info@funcasino-royale.co.uk",
+      "step_number": 4,
+      "status": "pending",
+      "scheduled_at": "2026-11-24T19:04:07"
+    },
+    {
+      "send_id": 1472,
+      "lead_id": 1001,
+      "business_name": "Aigburth Peoples Hall",
+      "email": "info@aigburthpeopleshall.co.uk",
+      "step_number": 2,
+      "status": "pending",
+      "scheduled_at": "2026-11-06T16:29:14"
+    },
+    {
+      "send_id": 1473,
+      "lead_id": 1001,
+      "business_name": "Aigburth Peoples Hall",
+      "email": "info@aigburthpeopleshall.co.uk",
+      "step_number": 3,
+      "status": "pending",
+      "scheduled_at": "2026-11-10T18:58:58"
+    },
+    {
+      "send_id": 1474,
+      "lead_id": 1001,
+      "business_name": "Aigburth Peoples Hall",
+      "email": "info@aigburthpeopleshall.co.uk",
+      "step_number": 4,
+      "status": "pending",
+      "scheduled_at": "2026-11-24T18:58:58"
+    },
+    {
+      "send_id": 1492,
+      "lead_id": 1003,
+      "business_name": "Exhibition Centre Liverpool",
+      "email": "customerservice@lexliverpool.com",
+      "step_number": 2,
+      "status": "pending",
+      "scheduled_at": "2026-11-06T16:35:15"
+    },
+    {
+      "send_id": 1493,
+      "lead_id": 1003,
+      "business_name": "Exhibition Centre Liverpool",
+      "email": "customerservice@lexliverpool.com",
+      "step_number": 3,
+      "status": "pending",
+      "scheduled_at": "2026-11-10T19:02:06"
+    },
+    {
+      "send_id": 1494,
+      "lead_id": 1003,
+      "business_name": "Exhibition Centre Liverpool",
+      "email": "customerservice@lexliverpool.com",
+      "step_number": 4,
+      "status": "pending",
+      "scheduled_at": "2026-11-24T19:02:06"
+    },
+    {
+      "send_id": 1520,
+      "lead_id": 1005,
+      "business_name": "Opus Events",
+      "email": "info@opus-events.co.uk",
+      "step_number": 2,
+      "status": "pending",
+      "scheduled_at": "2026-11-06T16:38:13"
+    },
+    {
+      "send_id": 1521,
+      "lead_id": 1005,
+      "business_name": "Opus Events",
+      "email": "info@opus-events.co.uk",
+      "step_number": 3,
+      "status": "pending",
+      "scheduled_at": "2026-11-10T19:09:36"
+    },
+    {
+      "send_id": 1522,
+      "lead_id": 1005,
+      "business_name": "Opus Events",
+      "email": "info@opus-events.co.uk",
+      "step_number": 4,
+      "status": "pending",
+      "scheduled_at": "2026-11-24T19:09:36"
+    },
+    {
+      "send_id": 1516,
+      "lead_id": 1006,
+      "business_name": "OH ME OH MY",
+      "email": "info@ohmeohmyliverpool.co.uk",
+      "step_number": 2,
+      "status": "pending",
+      "scheduled_at": "2026-11-06T17:05:15"
+    },
+    {
+      "send_id": 1517,
+      "lead_id": 1006,
+      "business_name": "OH ME OH MY",
+      "email": "info@ohmeohmyliverpool.co.uk",
+      "step_number": 3,
+      "status": "pending",
+      "scheduled_at": "2026-11-10T19:09:12"
+    },
+    {
+      "send_id": 1518,
+      "lead_id": 1006,
+      "business_name": "OH ME OH MY",
+      "email": "info@ohmeohmyliverpool.co.uk",
+      "step_number": 4,
+      "status": "pending",
+      "scheduled_at": "2026-11-24T19:09:12"
+    },
+    {
+      "send_id": 1488,
+      "lead_id": 1007,
+      "business_name": "Events Design Company Limited",
+      "email": "info@eventdesign.co",
+      "step_number": 2,
+      "status": "pending",
+      "scheduled_at": "2026-11-06T16:33:14"
+    },
+    {
+      "send_id": 1489,
+      "lead_id": 1007,
+      "business_name": "Events Design Company Limited",
+      "email": "info@eventdesign.co",
+      "step_number": 3,
+      "status": "pending",
+      "scheduled_at": "2026-11-10T19:01:29"
+    },
+    {
+      "send_id": 1490,
+      "lead_id": 1007,
+      "business_name": "Events Design Company Limited",
+      "email": "info@eventdesign.co",
+      "step_number": 4,
+      "status": "pending",
+      "scheduled_at": "2026-11-24T19:01:29"
+    },
+    {
+      "send_id": 1508,
+      "lead_id": 1008,
+      "business_name": "Liverpool Wedding Car Hire",
+      "email": "enquiries@liverpoolweddingcarhire.com",
+      "step_number": 2,
+      "status": "pending",
+      "scheduled_at": "2026-11-06T17:06:13"
+    },
+    {
+      "send_id": 1509,
+      "lead_id": 1008,
+      "business_name": "Liverpool Wedding Car Hire",
+      "email": "enquiries@liverpoolweddingcarhire.com",
+      "step_number": 3,
+      "status": "pending",
+      "scheduled_at": "2026-11-10T19:08:11"
+    },
+    {
+      "send_id": 1510,
+      "lead_id": 1008,
+      "business_name": "Liverpool Wedding Car Hire",
+      "email": "enquiries@liverpoolweddingcarhire.com",
+      "step_number": 4,
+      "status": "pending",
+      "scheduled_at": "2026-11-24T19:08:11"
+    },
+    {
+      "send_id": 1552,
+      "lead_id": 1012,
+      "business_name": "The Bentley Liverpool",
+      "email": "info@bentleyliverpool.co.uk",
+      "step_number": 2,
+      "status": "pending",
+      "scheduled_at": "2026-11-06T17:03:15"
+    },
+    {
+      "send_id": 1553,
+      "lead_id": 1012,
+      "business_name": "The Bentley Liverpool",
+      "email": "info@bentleyliverpool.co.uk",
+      "step_number": 3,
+      "status": "pending",
+      "scheduled_at": "2026-11-10T19:27:33"
+    },
+    {
+      "send_id": 1554,
+      "lead_id": 1012,
+      "business_name": "The Bentley Liverpool",
+      "email": "info@bentleyliverpool.co.uk",
+      "step_number": 4,
+      "status": "pending",
+      "scheduled_at": "2026-11-24T19:27:33"
+    },
+    {
+      "send_id": 1556,
+      "lead_id": 1013,
+      "business_name": "Liverpool Naval Club",
+      "email": "info@liverpoolnavalclub.co.uk",
+      "step_number": 2,
+      "status": "pending",
+      "scheduled_at": "2026-11-06T17:04:13"
+    },
+    {
+      "send_id": 1557,
+      "lead_id": 1013,
+      "business_name": "Liverpool Naval Club",
+      "email": "info@liverpoolnavalclub.co.uk",
+      "step_number": 3,
+      "status": "pending",
+      "scheduled_at": "2026-11-10T19:28:14"
+    },
+    {
+      "send_id": 1558,
+      "lead_id": 1013,
+      "business_name": "Liverpool Naval Club",
+      "email": "info@liverpoolnavalclub.co.uk",
+      "step_number": 4,
+      "status": "pending",
+      "scheduled_at": "2026-11-24T19:28:14"
+    },
+    {
+      "send_id": 1548,
+      "lead_id": 1014,
+      "business_name": "Bacchus Wine Tasting",
+      "email": "info@bacchuswinetasting.co.uk",
+      "step_number": 2,
+      "status": "pending",
+      "scheduled_at": "2026-11-06T17:02:13"
+    },
+    {
+      "send_id": 1549,
+      "lead_id": 1014,
+      "business_name": "Bacchus Wine Tasting",
+      "email": "info@bacchuswinetasting.co.uk",
+      "step_number": 3,
+      "status": "pending",
+      "scheduled_at": "2026-11-10T19:25:41"
+    },
+    {
+      "send_id": 1550,
+      "lead_id": 1014,
+      "business_name": "Bacchus Wine Tasting",
+      "email": "info@bacchuswinetasting.co.uk",
+      "step_number": 4,
+      "status": "pending",
+      "scheduled_at": "2026-11-24T19:25:41"
+    },
+    {
+      "send_id": 1564,
+      "lead_id": 1015,
+      "business_name": "Brener Construction, Inc. @ Apartment Renovation NYC",
+      "email": "info@brenerconstruction.com",
+      "step_number": 2,
+      "status": "pending",
+      "scheduled_at": "2026-11-03T19:44:42"
+    },
+    {
+      "send_id": 1565,
+      "lead_id": 1015,
+      "business_name": "Brener Construction, Inc. @ Apartment Renovation NYC",
+      "email": "info@brenerconstruction.com",
+      "step_number": 3,
+      "status": "pending",
+      "scheduled_at": "2026-11-10T19:44:42"
+    },
+    {
+      "send_id": 1566,
+      "lead_id": 1015,
+      "business_name": "Brener Construction, Inc. @ Apartment Renovation NYC",
+      "email": "info@brenerconstruction.com",
+      "step_number": 4,
+      "status": "pending",
+      "scheduled_at": "2026-11-24T19:44:42"
+    },
+    {
+      "send_id": 1580,
+      "lead_id": 1016,
+      "business_name": "Grandeur Hills Group | General Contractor NYC",
+      "email": "info@grandeurhillsgroup.com",
+      "step_number": 2,
+      "status": "pending",
+      "scheduled_at": "2026-11-03T19:47:17"
+    },
+    {
+      "send_id": 1581,
+      "lead_id": 1016,
+      "business_name": "Grandeur Hills Group | General Contractor NYC",
+      "email": "info@grandeurhillsgroup.com",
+      "step_number": 3,
+      "status": "pending",
+      "scheduled_at": "2026-11-10T19:47:17"
+    },
+    {
+      "send_id": 1582,
+      "lead_id": 1016,
+      "business_name": "Grandeur Hills Group | General Contractor NYC",
+      "email": "info@grandeurhillsgroup.com",
+      "step_number": 4,
+      "status": "pending",
+      "scheduled_at": "2026-11-24T19:47:17"
+    },
+    {
+      "send_id": 1588,
+      "lead_id": 1017,
+      "business_name": "NY Built Construction",
+      "email": "info@nybuilt.com",
+      "step_number": 2,
+      "status": "pending",
+      "scheduled_at": "2026-11-03T19:49:27"
+    },
+    {
+      "send_id": 1589,
+      "lead_id": 1017,
+      "business_name": "NY Built Construction",
+      "email": "info@nybuilt.com",
+      "step_number": 3,
+      "status": "pending",
+      "scheduled_at": "2026-11-10T19:49:27"
+    },
+    {
+      "send_id": 1590,
+      "lead_id": 1017,
+      "business_name": "NY Built Construction",
+      "email": "info@nybuilt.com",
+      "step_number": 4,
+      "status": "pending",
+      "scheduled_at": "2026-11-24T19:49:27"
+    },
+    {
+      "send_id": 1576,
+      "lead_id": 1018,
+      "business_name": "General Contractor NYC",
+      "email": "info@generalcontractornyc.net",
+      "step_number": 2,
+      "status": "pending",
+      "scheduled_at": "2026-11-03T19:46:47"
+    },
+    {
+      "send_id": 1577,
+      "lead_id": 1018,
+      "business_name": "General Contractor NYC",
+      "email": "info@generalcontractornyc.net",
+      "step_number": 3,
+      "status": "pending",
+      "scheduled_at": "2026-11-10T19:46:47"
+    },
+    {
+      "send_id": 1578,
+      "lead_id": 1018,
+      "business_name": "General Contractor NYC",
+      "email": "info@generalcontractornyc.net",
+      "step_number": 4,
+      "status": "pending",
+      "scheduled_at": "2026-11-24T19:46:47"
+    },
+    {
+      "send_id": 1592,
+      "lead_id": 1019,
+      "business_name": "NYC Skyline Construction Corp",
+      "email": "nycskylineconstruction@gmail.com",
+      "step_number": 2,
+      "status": "pending",
+      "scheduled_at": "2026-11-03T19:49:56"
+    },
+    {
+      "send_id": 1593,
+      "lead_id": 1019,
+      "business_name": "NYC Skyline Construction Corp",
+      "email": "nycskylineconstruction@gmail.com",
+      "step_number": 3,
+      "status": "pending",
+      "scheduled_at": "2026-11-10T19:49:56"
+    },
+    {
+      "send_id": 1594,
+      "lead_id": 1019,
+      "business_name": "NYC Skyline Construction Corp",
+      "email": "nycskylineconstruction@gmail.com",
+      "step_number": 4,
+      "status": "pending",
+      "scheduled_at": "2026-11-24T19:49:56"
+    },
+    {
+      "send_id": 1596,
+      "lead_id": 1020,
+      "business_name": "Renaissance General Contracting of NYC",
+      "email": "info@renaissancegeneralcontracting.com",
+      "step_number": 2,
+      "status": "pending",
+      "scheduled_at": "2026-11-03T19:50:01"
+    },
+    {
+      "send_id": 1597,
+      "lead_id": 1020,
+      "business_name": "Renaissance General Contracting of NYC",
+      "email": "info@renaissancegeneralcontracting.com",
+      "step_number": 3,
+      "status": "pending",
+      "scheduled_at": "2026-11-10T19:50:01"
+    },
+    {
+      "send_id": 1598,
+      "lead_id": 1020,
+      "business_name": "Renaissance General Contracting of NYC",
+      "email": "info@renaissancegeneralcontracting.com",
+      "step_number": 4,
+      "status": "pending",
+      "scheduled_at": "2026-11-24T19:50:01"
+    },
+    {
+      "send_id": 1572,
+      "lead_id": 1023,
+      "business_name": "Corniel Construction",
+      "email": "waldy@cornielconstruction.com",
+      "step_number": 2,
+      "status": "pending",
+      "scheduled_at": "2026-11-03T19:45:56"
+    },
+    {
+      "send_id": 1573,
+      "lead_id": 1023,
+      "business_name": "Corniel Construction",
+      "email": "waldy@cornielconstruction.com",
+      "step_number": 3,
+      "status": "pending",
+      "scheduled_at": "2026-11-10T19:45:56"
+    },
+    {
+      "send_id": 1574,
+      "lead_id": 1023,
+      "business_name": "Corniel Construction",
+      "email": "waldy@cornielconstruction.com",
+      "step_number": 4,
+      "status": "pending",
+      "scheduled_at": "2026-11-24T19:45:56"
+    },
+    {
+      "send_id": 1568,
+      "lead_id": 1027,
+      "business_name": "Ark Construction NY",
+      "email": "arkconstructionny@gmail.com",
+      "step_number": 2,
+      "status": "pending",
+      "scheduled_at": "2026-11-03T19:45:12"
+    },
+    {
+      "send_id": 1569,
+      "lead_id": 1027,
+      "business_name": "Ark Construction NY",
+      "email": "arkconstructionny@gmail.com",
+      "step_number": 3,
+      "status": "pending",
+      "scheduled_at": "2026-11-10T19:45:12"
+    },
+    {
+      "send_id": 1570,
+      "lead_id": 1027,
+      "business_name": "Ark Construction NY",
+      "email": "arkconstructionny@gmail.com",
+      "step_number": 4,
+      "status": "pending",
+      "scheduled_at": "2026-11-24T19:45:12"
+    },
+    {
+      "send_id": 1560,
+      "lead_id": 1028,
+      "business_name": "4T NYC CONSTRUCTION INC",
+      "email": "4tnyc.construction@gmail.com",
+      "step_number": 2,
+      "status": "pending",
+      "scheduled_at": "2026-11-03T19:43:18"
+    },
+    {
+      "send_id": 1561,
+      "lead_id": 1028,
+      "business_name": "4T NYC CONSTRUCTION INC",
+      "email": "4tnyc.construction@gmail.com",
+      "step_number": 3,
+      "status": "pending",
+      "scheduled_at": "2026-11-10T19:43:18"
+    },
+    {
+      "send_id": 1562,
+      "lead_id": 1028,
+      "business_name": "4T NYC CONSTRUCTION INC",
+      "email": "4tnyc.construction@gmail.com",
+      "step_number": 4,
+      "status": "pending",
+      "scheduled_at": "2026-11-24T19:43:18"
+    },
+    {
+      "send_id": 1584,
+      "lead_id": 1030,
+      "business_name": "L B General Construction Inc",
+      "email": "info@lbgeneralconstruction.com",
+      "step_number": 2,
+      "status": "pending",
+      "scheduled_at": "2026-11-03T19:49:08"
+    },
+    {
+      "send_id": 1585,
+      "lead_id": 1030,
+      "business_name": "L B General Construction Inc",
+      "email": "info@lbgeneralconstruction.com",
+      "step_number": 3,
+      "status": "pending",
+      "scheduled_at": "2026-11-10T19:49:08"
+    },
+    {
+      "send_id": 1586,
+      "lead_id": 1030,
+      "business_name": "L B General Construction Inc",
+      "email": "info@lbgeneralconstruction.com",
+      "step_number": 4,
+      "status": "pending",
+      "scheduled_at": "2026-11-24T19:49:08"
+    },
+    {
+      "send_id": 1612,
+      "lead_id": 1039,
+      "business_name": "Ally Construction Contractors",
+      "email": "info@allyrenovationsnyc.com",
+      "step_number": 2,
+      "status": "pending",
+      "scheduled_at": "2026-11-03T19:54:35"
+    },
+    {
+      "send_id": 1613,
+      "lead_id": 1039,
+      "business_name": "Ally Construction Contractors",
+      "email": "info@allyrenovationsnyc.com",
+      "step_number": 3,
+      "status": "pending",
+      "scheduled_at": "2026-11-10T19:54:35"
+    },
+    {
+      "send_id": 1614,
+      "lead_id": 1039,
+      "business_name": "Ally Construction Contractors",
+      "email": "info@allyrenovationsnyc.com",
+      "step_number": 4,
+      "status": "pending",
+      "scheduled_at": "2026-11-24T19:54:35"
+    },
+    {
+      "send_id": 1620,
+      "lead_id": 1042,
+      "business_name": "A to Z Renovations NYC",
+      "email": "info@atozrenovationsny.com",
+      "step_number": 2,
+      "status": "pending",
+      "scheduled_at": "2026-11-03T19:56:02"
+    },
+    {
+      "send_id": 1621,
+      "lead_id": 1042,
+      "business_name": "A to Z Renovations NYC",
+      "email": "info@atozrenovationsny.com",
+      "step_number": 3,
+      "status": "pending",
+      "scheduled_at": "2026-11-10T19:56:02"
+    },
+    {
+      "send_id": 1622,
+      "lead_id": 1042,
+      "business_name": "A to Z Renovations NYC",
+      "email": "info@atozrenovationsny.com",
+      "step_number": 4,
+      "status": "pending",
+      "scheduled_at": "2026-11-24T19:56:02"
+    },
+    {
+      "send_id": 1600,
+      "lead_id": 1052,
+      "business_name": "Ahmed Construction NYC Inc",
+      "email": "ahmedconstruction.nyc@gmail.com",
+      "step_number": 2,
+      "status": "pending",
+      "scheduled_at": "2026-11-03T19:53:19"
+    },
+    {
+      "send_id": 1601,
+      "lead_id": 1052,
+      "business_name": "Ahmed Construction NYC Inc",
+      "email": "ahmedconstruction.nyc@gmail.com",
+      "step_number": 3,
+      "status": "pending",
+      "scheduled_at": "2026-11-10T19:53:19"
+    },
+    {
+      "send_id": 1602,
+      "lead_id": 1052,
+      "business_name": "Ahmed Construction NYC Inc",
+      "email": "ahmedconstruction.nyc@gmail.com",
+      "step_number": 4,
+      "status": "pending",
+      "scheduled_at": "2026-11-24T19:53:19"
+    },
+    {
+      "send_id": 1652,
+      "lead_id": 1056,
+      "business_name": "NYC 84 Commercial & Residential Contractor New York",
+      "email": "info@citylocal101.com",
+      "step_number": 2,
+      "status": "pending",
+      "scheduled_at": "2026-11-03T20:05:49"
+    },
+    {
+      "send_id": 1653,
+      "lead_id": 1056,
+      "business_name": "NYC 84 Commercial & Residential Contractor New York",
+      "email": "info@citylocal101.com",
+      "step_number": 3,
+      "status": "pending",
+      "scheduled_at": "2026-11-10T20:05:49"
+    },
+    {
+      "send_id": 1654,
+      "lead_id": 1056,
+      "business_name": "NYC 84 Commercial & Residential Contractor New York",
+      "email": "info@citylocal101.com",
+      "step_number": 4,
+      "status": "pending",
+      "scheduled_at": "2026-11-24T20:05:49"
+    },
+    {
+      "send_id": 1608,
+      "lead_id": 1058,
+      "business_name": "Alliance General Construction Corp",
+      "email": "alliancegconstruction@gmail.com",
+      "step_number": 2,
+      "status": "pending",
+      "scheduled_at": "2026-11-03T19:53:46"
+    },
+    {
+      "send_id": 1609,
+      "lead_id": 1058,
+      "business_name": "Alliance General Construction Corp",
+      "email": "alliancegconstruction@gmail.com",
+      "step_number": 3,
+      "status": "pending",
+      "scheduled_at": "2026-11-10T19:53:46"
+    },
+    {
+      "send_id": 1610,
+      "lead_id": 1058,
+      "business_name": "Alliance General Construction Corp",
+      "email": "alliancegconstruction@gmail.com",
+      "step_number": 4,
+      "status": "pending",
+      "scheduled_at": "2026-11-24T19:53:46"
+    },
+    {
+      "send_id": 1604,
+      "lead_id": 1062,
+      "business_name": "Ajrin Construction Inc.",
+      "email": "info@ajrinconstruction.com",
+      "step_number": 2,
+      "status": "pending",
+      "scheduled_at": "2026-11-03T19:53:25"
+    },
+    {
+      "send_id": 1605,
+      "lead_id": 1062,
+      "business_name": "Ajrin Construction Inc.",
+      "email": "info@ajrinconstruction.com",
+      "step_number": 3,
+      "status": "pending",
+      "scheduled_at": "2026-11-10T19:53:25"
+    },
+    {
+      "send_id": 1606,
+      "lead_id": 1062,
+      "business_name": "Ajrin Construction Inc.",
+      "email": "info@ajrinconstruction.com",
+      "step_number": 4,
+      "status": "pending",
+      "scheduled_at": "2026-11-24T19:53:25"
+    },
+    {
+      "send_id": 1660,
+      "lead_id": 1068,
+      "business_name": "D&R NYC Construction Services",
+      "email": "info@dandrnyc.com",
+      "step_number": 2,
+      "status": "pending",
+      "scheduled_at": "2026-11-03T20:06:05"
+    },
+    {
+      "send_id": 1661,
+      "lead_id": 1068,
+      "business_name": "D&R NYC Construction Services",
+      "email": "info@dandrnyc.com",
+      "step_number": 3,
+      "status": "pending",
+      "scheduled_at": "2026-11-10T20:06:05"
+    },
+    {
+      "send_id": 1662,
+      "lead_id": 1068,
+      "business_name": "D&R NYC Construction Services",
+      "email": "info@dandrnyc.com",
+      "step_number": 4,
+      "status": "pending",
+      "scheduled_at": "2026-11-24T20:06:05"
+    },
+    {
+      "send_id": 1668,
+      "lead_id": 1070,
+      "business_name": "Gjana Construction",
+      "email": "info@gjanaconstruction.com",
+      "step_number": 2,
+      "status": "pending",
+      "scheduled_at": "2026-11-03T20:07:34"
+    },
+    {
+      "send_id": 1669,
+      "lead_id": 1070,
+      "business_name": "Gjana Construction",
+      "email": "info@gjanaconstruction.com",
+      "step_number": 3,
+      "status": "pending",
+      "scheduled_at": "2026-11-10T20:07:34"
+    },
+    {
+      "send_id": 1670,
+      "lead_id": 1070,
+      "business_name": "Gjana Construction",
+      "email": "info@gjanaconstruction.com",
+      "step_number": 4,
+      "status": "pending",
+      "scheduled_at": "2026-11-24T20:07:34"
+    }
+  ],
+  "pending_followups_of_queued_leads": [
+    {
+      "send_id": 1528,
+      "lead_id": 994,
+      "business_name": "Pinot & Picasso Liverpool - Sip and Paint",
+      "email": "info@pinotandpicasso.uk",
+      "step_number": 2,
+      "status": "pending",
+      "scheduled_at": "2026-11-03T19:10:07"
+    },
+    {
+      "send_id": 1529,
+      "lead_id": 994,
+      "business_name": "Pinot & Picasso Liverpool - Sip and Paint",
+      "email": "info@pinotandpicasso.uk",
+      "step_number": 3,
+      "status": "pending",
+      "scheduled_at": "2026-11-10T19:10:07"
+    },
+    {
+      "send_id": 1530,
+      "lead_id": 994,
+      "business_name": "Pinot & Picasso Liverpool - Sip and Paint",
+      "email": "info@pinotandpicasso.uk",
+      "step_number": 4,
+      "status": "pending",
+      "scheduled_at": "2026-11-24T19:10:07"
+    },
+    {
+      "send_id": 1524,
+      "lead_id": 998,
+      "business_name": "PartyZone Liverpool",
+      "email": "info@partyzoneliverpool.co.uk",
+      "step_number": 2,
+      "status": "pending",
+      "scheduled_at": "2026-11-03T19:09:42"
+    },
+    {
+      "send_id": 1525,
+      "lead_id": 998,
+      "business_name": "PartyZone Liverpool",
+      "email": "info@partyzoneliverpool.co.uk",
+      "step_number": 3,
+      "status": "pending",
+      "scheduled_at": "2026-11-10T19:09:42"
+    },
+    {
+      "send_id": 1526,
+      "lead_id": 998,
+      "business_name": "PartyZone Liverpool",
+      "email": "info@partyzoneliverpool.co.uk",
+      "step_number": 4,
+      "status": "pending",
+      "scheduled_at": "2026-11-24T19:09:42"
+    },
+    {
+      "send_id": 1540,
+      "lead_id": 999,
+      "business_name": "Ivy Events",
+      "email": "info@sweetpeaandivy.co.uk",
+      "step_number": 2,
+      "status": "pending",
+      "scheduled_at": "2026-11-03T19:14:09"
+    },
+    {
+      "send_id": 1541,
+      "lead_id": 999,
+      "business_name": "Ivy Events",
+      "email": "info@sweetpeaandivy.co.uk",
+      "step_number": 3,
+      "status": "pending",
+      "scheduled_at": "2026-11-10T19:14:09"
+    },
+    {
+      "send_id": 1542,
+      "lead_id": 999,
+      "business_name": "Ivy Events",
+      "email": "info@sweetpeaandivy.co.uk",
+      "step_number": 4,
+      "status": "pending",
+      "scheduled_at": "2026-11-24T19:14:09"
+    },
+    {
+      "send_id": 1512,
+      "lead_id": 1004,
+      "business_name": "Murder Weekends",
+      "email": "geri@murder.co.uk",
+      "step_number": 2,
+      "status": "pending",
+      "scheduled_at": "2026-11-03T19:08:38"
+    },
+    {
+      "send_id": 1513,
+      "lead_id": 1004,
+      "business_name": "Murder Weekends",
+      "email": "geri@murder.co.uk",
+      "step_number": 3,
+      "status": "pending",
+      "scheduled_at": "2026-11-10T19:08:38"
+    },
+    {
+      "send_id": 1514,
+      "lead_id": 1004,
+      "business_name": "Murder Weekends",
+      "email": "geri@murder.co.uk",
+      "step_number": 4,
+      "status": "pending",
+      "scheduled_at": "2026-11-24T19:08:38"
+    },
+    {
+      "send_id": 1544,
+      "lead_id": 1009,
+      "business_name": "The Festive Group",
+      "email": "info@thefestivegroup.com",
+      "step_number": 2,
+      "status": "pending",
+      "scheduled_at": "2026-11-03T19:14:33"
+    },
+    {
+      "send_id": 1545,
+      "lead_id": 1009,
+      "business_name": "The Festive Group",
+      "email": "info@thefestivegroup.com",
+      "step_number": 3,
+      "status": "pending",
+      "scheduled_at": "2026-11-10T19:14:33"
+    },
+    {
+      "send_id": 1546,
+      "lead_id": 1009,
+      "business_name": "The Festive Group",
+      "email": "info@thefestivegroup.com",
+      "step_number": 4,
+      "status": "pending",
+      "scheduled_at": "2026-11-24T19:14:33"
+    },
+    {
+      "send_id": 1536,
+      "lead_id": 1010,
+      "business_name": "Spartacus Bubble Soccer",
+      "email": "hi@spartacusbubblesoccer.co.uk",
+      "step_number": 2,
+      "status": "pending",
+      "scheduled_at": "2026-11-03T19:11:09"
+    },
+    {
+      "send_id": 1537,
+      "lead_id": 1010,
+      "business_name": "Spartacus Bubble Soccer",
+      "email": "hi@spartacusbubblesoccer.co.uk",
+      "step_number": 3,
+      "status": "pending",
+      "scheduled_at": "2026-11-10T19:11:09"
+    },
+    {
+      "send_id": 1538,
+      "lead_id": 1010,
+      "business_name": "Spartacus Bubble Soccer",
+      "email": "hi@spartacusbubblesoccer.co.uk",
+      "step_number": 4,
+      "status": "pending",
+      "scheduled_at": "2026-11-24T19:11:09"
+    },
+    {
+      "send_id": 1532,
+      "lead_id": 1011,
+      "business_name": "Sean Coyle Golf Events",
+      "email": "info@seancoylegolfevents.com",
+      "step_number": 2,
+      "status": "pending",
+      "scheduled_at": "2026-11-03T19:10:41"
+    },
+    {
+      "send_id": 1533,
+      "lead_id": 1011,
+      "business_name": "Sean Coyle Golf Events",
+      "email": "info@seancoylegolfevents.com",
+      "step_number": 3,
+      "status": "pending",
+      "scheduled_at": "2026-11-10T19:10:41"
+    },
+    {
+      "send_id": 1534,
+      "lead_id": 1011,
+      "business_name": "Sean Coyle Golf Events",
+      "email": "info@seancoylegolfevents.com",
+      "step_number": 4,
+      "status": "pending",
+      "scheduled_at": "2026-11-24T19:10:41"
+    }
+  ],
+  "outbound_counts": [
+    {
+      "status": "pending",
+      "n": 6
+    },
+    {
+      "status": "sending",
+      "n": 1
+    },
+    {
+      "status": "sent",
+      "n": 16
+    }
+  ],
+  "outbound_open": [
+    {
+      "id": 26,
+      "lead_id": 1004,
+      "status": "sending",
+      "to_email": "geri@murder.co.uk",
+      "subject": "Closing the loop",
+      "attempts": 2,
+      "next_attempt_at": "2026-11-03T16:44:06.749752+00:00",
+      "lease_expires_at": "2026-11-03T17:16:22.028706+00:00",
+      "created_at": "2026-11-03T16:14:37.575487+00:00",
+      "sent_at": null
+    },
+    {
+      "id": 29,
+      "lead_id": 998,
+      "status": "pending",
+      "to_email": "info@partyzoneliverpool.co.uk",
+      "subject": "Closing the loop",
+      "attempts": 1,
+      "next_attempt_at": "2026-11-03T16:46:13.631451+00:00",
+      "lease_expires_at": null,
+      "created_at": "2026-11-03T16:14:56.046712+00:00",
+      "sent_at": null
+    },
+    {
+      "id": 30,
+      "lead_id": 994,
+      "status": "pending",
+      "to_email": "info@pinotandpicasso.uk",
+      "subject": "Closing the loop",
+      "attempts": 1,
+      "next_attempt_at": "2026-11-03T16:52:07.400144+00:00",
+      "lease_expires_at": null,
+      "created_at": "2026-11-03T16:15:02.133401+00:00",
+      "sent_at": null
+    },
+    {
+      "id": 31,
+      "lead_id": 1011,
+      "status": "pending",
+      "to_email": "info@seancoylegolfevents.com",
+      "subject": "Closing the loop",
+      "attempts": 1,
+      "next_attempt_at": "2026-11-03T16:48:07.326717+00:00",
+      "lease_expires_at": null,
+      "created_at": "2026-11-03T16:15:08.280050+00:00",
+      "sent_at": null
+    },
+    {
+      "id": 32,
+      "lead_id": 1010,
+      "status": "pending",
+      "to_email": "hi@spartacusbubblesoccer.co.uk",
+      "subject": "Closing the loop",
+      "attempts": 1,
+      "next_attempt_at": "2026-11-03T16:50:07.001916+00:00",
+      "lease_expires_at": null,
+      "created_at": "2026-11-03T16:15:14.389775+00:00",
+      "sent_at": null
+    },
+    {
+      "id": 33,
+      "lead_id": 999,
+      "status": "pending",
+      "to_email": "info@sweetpeaandivy.co.uk",
+      "subject": "Closing the loop",
+      "attempts": 1,
+      "next_attempt_at": "2026-11-03T16:55:06.960552+00:00",
+      "lease_expires_at": null,
+      "created_at": "2026-11-03T16:15:20.672017+00:00",
+      "sent_at": null
+    },
+    {
+      "id": 34,
+      "lead_id": 1009,
+      "status": "pending",
+      "to_email": "info@thefestivegroup.com",
+      "subject": "Closing the loop",
+      "attempts": 1,
+      "next_attempt_at": "2026-11-03T16:59:08.270584+00:00",
+      "lease_expires_at": null,
+      "created_at": "2026-11-03T16:15:26.869683+00:00",
+      "sent_at": null
+    }
+  ],
+  "outbound_all": [
+    {
+      "id": 11,
+      "lead_id": 989,
+      "status": "sent",
+      "to_email": "office@academyentertainments.com",
+      "subject": "Closing the loop",
+      "attempts": 1,
+      "next_attempt_at": "2026-11-03T10:16:36.424003+00:00",
+      "sent_at": "2026-11-03T10:49:14.590388+00:00",
+      "created_at": "2026-11-03T10:16:15.049798+00:00"
+    },
+    {
+      "id": 16,
+      "lead_id": 1001,
+      "status": "sent",
+      "to_email": "info@aigburthpeopleshall.co.uk",
+      "subject": "Closing the loop",
+      "attempts": 1,
+      "next_attempt_at": "2026-11-03T16:13:20.842444+00:00",
+      "sent_at": "2026-11-03T16:29:12.031136+00:00",
+      "created_at": "2026-11-03T16:13:16.860468+00:00"
+    },
+    {
+      "id": 17,
+      "lead_id": 997,
+      "status": "sent",
+      "to_email": "bookings@coverstarexperiences.co.uk",
+      "subject": "Closing the loop",
+      "attempts": 1,
+      "next_attempt_at": "2026-11-03T16:13:41.353397+00:00",
+      "sent_at": "2026-11-03T16:30:12.030723+00:00",
+      "created_at": "2026-11-03T16:13:41.779052+00:00"
+    },
+    {
+      "id": 18,
+      "lead_id": 971,
+      "status": "sent",
+      "to_email": "info@diamondlifeevents.co.uk",
+      "subject": "Closing the loop",
+      "attempts": 1,
+      "next_attempt_at": "2026-11-03T16:13:50.431864+00:00",
+      "sent_at": "2026-11-03T16:31:12.537642+00:00",
+      "created_at": "2026-11-03T16:13:47.892591+00:00"
+    },
+    {
+      "id": 19,
+      "lead_id": 996,
+      "status": "sent",
+      "to_email": "info@dtliverpool.co.uk",
+      "subject": "Closing the loop",
+      "attempts": 1,
+      "next_attempt_at": "2026-11-03T16:13:53.919853+00:00",
+      "sent_at": "2026-11-03T16:32:11.544050+00:00",
+      "created_at": "2026-11-03T16:13:54.078389+00:00"
+    },
+    {
+      "id": 20,
+      "lead_id": 1007,
+      "status": "sent",
+      "to_email": "info@eventdesign.co",
+      "subject": "Closing the loop",
+      "attempts": 1,
+      "next_attempt_at": "2026-11-03T16:14:05.983875+00:00",
+      "sent_at": "2026-11-03T16:33:12.660156+00:00",
+      "created_at": "2026-11-03T16:14:00.224645+00:00"
+    },
+    {
+      "id": 21,
+      "lead_id": 1003,
+      "status": "sent",
+      "to_email": "customerservice@lexliverpool.com",
+      "subject": "Closing the loop",
+      "attempts": 1,
+      "next_attempt_at": "2026-11-03T16:14:18.806254+00:00",
+      "sent_at": "2026-11-03T16:35:13.185213+00:00",
+      "created_at": "2026-11-03T16:14:06.367021+00:00"
+    },
+    {
+      "id": 22,
+      "lead_id": 977,
+      "status": "sent",
+      "to_email": "info@flirtinaevents.co.uk",
+      "subject": "Closing the loop",
+      "attempts": 1,
+      "next_attempt_at": "2026-11-03T16:14:14.799542+00:00",
+      "sent_at": "2026-11-03T16:34:11.626501+00:00",
+      "created_at": "2026-11-03T16:14:12.811924+00:00"
+    },
+    {
+      "id": 23,
+      "lead_id": 1000,
+      "status": "sent",
+      "to_email": "info@funcasino-royale.co.uk",
+      "subject": "Closing the loop",
+      "attempts": 1,
+      "next_attempt_at": "2026-11-03T16:14:19.675591+00:00",
+      "sent_at": "2026-11-03T16:36:11.604759+00:00",
+      "created_at": "2026-11-03T16:14:19.121943+00:00"
+    },
+    {
+      "id": 24,
+      "lead_id": 991,
+      "status": "sent",
+      "to_email": "info@happydayseventsco.co.uk",
+      "subject": "Closing the loop",
+      "attempts": 1,
+      "next_attempt_at": "2026-11-03T16:14:41.758741+00:00",
+      "sent_at": "2026-11-03T16:37:12.600788+00:00",
+      "created_at": "2026-11-03T16:14:25.338276+00:00"
+    },
+    {
+      "id": 25,
+      "lead_id": 1008,
+      "status": "sent",
+      "to_email": "enquiries@liverpoolweddingcarhire.com",
+      "subject": "Closing the loop",
+      "attempts": 2,
+      "next_attempt_at": "2026-11-03T16:42:07.062606+00:00",
+      "sent_at": "2026-11-03T17:06:11.458525+00:00",
+      "created_at": "2026-11-03T16:14:31.468451+00:00"
+    },
+    {
+      "id": 26,
+      "lead_id": 1004,
+      "status": "sending",
+      "to_email": "geri@murder.co.uk",
+      "subject": "Closing the loop",
+      "attempts": 2,
+      "next_attempt_at": "2026-11-03T16:44:06.749752+00:00",
+      "sent_at": null,
+      "created_at": "2026-11-03T16:14:37.575487+00:00"
+    },
+    {
+      "id": 27,
+      "lead_id": 1006,
+      "status": "sent",
+      "to_email": "info@ohmeohmyliverpool.co.uk",
+      "subject": "Closing the loop",
+      "attempts": 2,
+      "next_attempt_at": "2026-11-03T16:39:08.446383+00:00",
+      "sent_at": "2026-11-03T17:05:12.851464+00:00",
+      "created_at": "2026-11-03T16:14:43.803475+00:00"
+    },
+    {
+      "id": 28,
+      "lead_id": 1005,
+      "status": "sent",
+      "to_email": "info@opus-events.co.uk",
+      "subject": "Closing the loop",
+      "attempts": 1,
+      "next_attempt_at": "2026-11-03T16:14:48.454044+00:00",
+      "sent_at": "2026-11-03T16:38:11.649456+00:00",
+      "created_at": "2026-11-03T16:14:49.917549+00:00"
+    },
+    {
+      "id": 29,
+      "lead_id": 998,
+      "status": "pending",
+      "to_email": "info@partyzoneliverpool.co.uk",
+      "subject": "Closing the loop",
+      "attempts": 1,
+      "next_attempt_at": "2026-11-03T16:46:13.631451+00:00",
+      "sent_at": null,
+      "created_at": "2026-11-03T16:14:56.046712+00:00"
+    },
+    {
+      "id": 30,
+      "lead_id": 994,
+      "status": "pending",
+      "to_email": "info@pinotandpicasso.uk",
+      "subject": "Closing the loop",
+      "attempts": 1,
+      "next_attempt_at": "2026-11-03T16:52:07.400144+00:00",
+      "sent_at": null,
+      "created_at": "2026-11-03T16:15:02.133401+00:00"
+    },
+    {
+      "id": 31,
+      "lead_id": 1011,
+      "status": "pending",
+      "to_email": "info@seancoylegolfevents.com",
+      "subject": "Closing the loop",
+      "attempts": 1,
+      "next_attempt_at": "2026-11-03T16:48:07.326717+00:00",
+      "sent_at": null,
+      "created_at": "2026-11-03T16:15:08.280050+00:00"
+    },
+    {
+      "id": 32,
+      "lead_id": 1010,
+      "status": "pending",
+      "to_email": "hi@spartacusbubblesoccer.co.uk",
+      "subject": "Closing the loop",
+      "attempts": 1,
+      "next_attempt_at": "2026-11-03T16:50:07.001916+00:00",
+      "sent_at": null,
+      "created_at": "2026-11-03T16:15:14.389775+00:00"
+    },
+    {
+      "id": 33,
+      "lead_id": 999,
+      "status": "pending",
+      "to_email": "info@sweetpeaandivy.co.uk",
+      "subject": "Closing the loop",
+      "attempts": 1,
+      "next_attempt_at": "2026-11-03T16:55:06.960552+00:00",
+      "sent_at": null,
+      "created_at": "2026-11-03T16:15:20.672017+00:00"
+    },
+    {
+      "id": 34,
+      "lead_id": 1009,
+      "status": "pending",
+      "to_email": "info@thefestivegroup.com",
+      "subject": "Closing the loop",
+      "attempts": 1,
+      "next_attempt_at": "2026-11-03T16:59:08.270584+00:00",
+      "sent_at": null,
+      "created_at": "2026-11-03T16:15:26.869683+00:00"
+    },
+    {
+      "id": 35,
+      "lead_id": 1014,
+      "status": "sent",
+      "to_email": "info@bacchuswinetasting.co.uk",
+      "subject": "Closing the loop",
+      "attempts": 1,
+      "next_attempt_at": "2026-11-03T16:15:41.190071+00:00",
+      "sent_at": "2026-11-03T17:02:11.516784+00:00",
+      "created_at": "2026-11-03T16:15:32.969464+00:00"
+    },
+    {
+      "id": 36,
+      "lead_id": 1012,
+      "status": "sent",
+      "to_email": "info@bentleyliverpool.co.uk",
+      "subject": "Closing the loop",
+      "attempts": 1,
+      "next_attempt_at": "2026-11-03T16:15:57.044607+00:00",
+      "sent_at": "2026-11-03T17:03:12.676831+00:00",
+      "created_at": "2026-11-03T16:15:39.149698+00:00"
+    },
+    {
+      "id": 37,
+      "lead_id": 1013,
+      "status": "sent",
+      "to_email": "info@liverpoolnavalclub.co.uk",
+      "subject": "Closing the loop",
+      "attempts": 1,
+      "next_attempt_at": "2026-11-03T16:15:58.370488+00:00",
+      "sent_at": "2026-11-03T17:04:11.422334+00:00",
+      "created_at": "2026-11-03T16:15:45.331432+00:00"
+    }
+  ],
+  "unknown_outbound_12_15": [
+    {
+      "id": 12,
+      "lead_id": 1069,
+      "business_name": "Multi Construction Co.",
+      "to_email": "%20contact@multiconstructionco.com",
+      "status": "unknown",
+      "attempts": 1,
+      "next_attempt_at": "2026-11-03T16:07:45.000026+00:00",
+      "created_at": "2026-11-03T16:07:46.593198+00:00",
+      "sent_at": null,
+      "last_error": "lease expired after send started; not retried automatically",
+      "campaign_id": 6,
+      "send_id": 1727
+    },
+    {
+      "id": 13,
+      "lead_id": 1057,
+      "business_name": "In & Out Construction",
+      "to_email": "info@inandoutnyc.net",
+      "status": "unknown",
+      "attempts": 1,
+      "next_attempt_at": "2026-11-03T16:13:02.554981+00:00",
+      "created_at": "2026-11-03T16:12:55.762795+00:00",
+      "sent_at": null,
+      "last_error": "lease expired after send started; not retried automatically",
+      "campaign_id": 6,
+      "send_id": 1731
+    },
+    {
+      "id": 14,
+      "lead_id": 1051,
+      "business_name": "Z. Abedin Construction LLC",
+      "to_email": "info@zabedinconstructionllc.com",
+      "status": "unknown",
+      "attempts": 1,
+      "next_attempt_at": "2026-11-03T16:13:17.099944+00:00",
+      "created_at": "2026-11-03T16:13:03.231126+00:00",
+      "sent_at": null,
+      "last_error": "lease expired after send started; not retried automatically",
+      "campaign_id": 6,
+      "send_id": 1735
+    },
+    {
+      "id": 15,
+      "lead_id": 1050,
+      "business_name": "Naim Construction",
+      "to_email": "naim@naimconstruction.com",
+      "status": "unknown",
+      "attempts": 1,
+      "next_attempt_at": "2026-11-03T16:13:19.236817+00:00",
+      "created_at": "2026-11-03T16:13:10.720524+00:00",
+      "sent_at": null,
+      "last_error": "lease expired after send started; not retried automatically",
+      "campaign_id": 6,
+      "send_id": 1739
+    }
+  ]
+}

@@ -6,6 +6,7 @@ Outreach endpoints — templates, campaigns, queue, and negotiation threads
 from typing import List, Literal, Optional
 
 import db
+import outreach
 from api.deps import get_org_id, require_org_admin
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field, model_validator
@@ -16,6 +17,7 @@ router = APIRouter()
 # ── Templates ────────────────────────────────────────────────
 @router.get("/templates")
 def list_templates(org_id: str = Depends(get_org_id)):
+    outreach.seed_default_templates(org_id=org_id)
     return db.list_templates(org_id=org_id)
 
 
@@ -187,6 +189,7 @@ class CampaignScriptVariantBody(BaseModel):
 class CampaignScriptSetBody(BaseModel):
     name: str = Field(min_length=1, max_length=120)
     scripts: List[CampaignScriptVariantBody] = Field(min_length=1, max_length=5)
+    step_delays: Optional[List[int]] = Field(default=None, max_length=4)
 
     @model_validator(mode="after")
     def validate_script_set(self):
@@ -196,6 +199,16 @@ class CampaignScriptSetBody(BaseModel):
         if len(step_counts) != 1:
             raise ValueError(
                 "Every script variant must have the same number of steps."
+            )
+        delays = self.step_delays
+        if delays is not None and (
+            len(delays) != next(iter(step_counts))
+            or any(not 0 <= delay <= 365 for delay in delays)
+            or delays[0] != 0
+        ):
+            raise ValueError(
+                "Provide a delay from 0 to 365 days for every step; "
+                "the initial email delay must be 0."
             )
         return self
 
@@ -232,6 +245,7 @@ def create_script_set(
         script_set_id = db.create_script_set(
             body.name.strip(),
             [script.model_dump() for script in body.scripts],
+            body.step_delays,
             org_id=org_id,
         )
     except ValueError as exc:
@@ -250,6 +264,7 @@ def update_script_set(
             script_set_id,
             body.name.strip(),
             [script.model_dump() for script in body.scripts],
+            body.step_delays,
             org_id=org_id,
         )
     except ValueError as exc:
@@ -285,33 +300,141 @@ class CampaignBody(BaseModel):
     lead_ids: List[int]
     sequence_id: Optional[int] = Field(default=None, gt=0, strict=True)
     script_set_id: Optional[int] = Field(default=None, gt=0, strict=True)
+    script_set_ids: Optional[List[int]] = Field(default=None, min_length=1)
+    template_sequence_ids: Optional[List[int]] = Field(default=None, min_length=1)
     steps: List[StepSpec] = Field(default_factory=list, max_length=4)
     notes: Optional[str] = None
+
+    @model_validator(mode="after")
+    def validate_template_options(self):
+        if self.template_sequence_ids is not None:
+            if len(set(self.template_sequence_ids)) != len(self.template_sequence_ids):
+                raise ValueError("A template sequence cannot be selected more than once.")
+            if (
+                self.sequence_id is not None
+                or self.script_set_id is not None
+                or self.script_set_ids is not None
+                or self.steps
+            ):
+                raise ValueError(
+                    "Template sequences cannot be combined with a saved sequence, "
+                    "script set, or explicit steps."
+                )
+        if self.script_set_ids is not None:
+            if len(set(self.script_set_ids)) != len(self.script_set_ids):
+                raise ValueError("A campaign automation cannot be selected more than once.")
+            if (
+                self.sequence_id is not None
+                or self.script_set_id is not None
+                or self.template_sequence_ids is not None
+                or self.steps
+            ):
+                raise ValueError(
+                    "Multiple campaign automations cannot be combined with another "
+                    "campaign template source."
+                )
+        return self
 
 
 @router.post("/campaigns")
 def create_campaign(body: CampaignBody, org_id: str = Depends(get_org_id)):
-    if body.sequence_id is None and not body.steps:
+    if (
+        body.sequence_id is None and not body.steps
+        and body.script_set_id is None
+        and body.script_set_ids is None
+        and body.template_sequence_ids is None
+    ):
         raise HTTPException(
             status_code=422,
-            detail="Select a saved sequence or provide at least one campaign step.",
+            detail=(
+                "Select campaign template sequences, a campaign script set, "
+                "multiple campaign automations, a saved sequence, or provide "
+                "at least one campaign step."
+            ),
         )
     if body.sequence_id is not None and not db.get_sequence(body.sequence_id, org_id=org_id):
         raise HTTPException(status_code=404, detail="Sequence not found")
     steps = [s.model_dump() for s in body.steps]
     try:
+        campaign_args = {
+            "notes": body.notes,
+            "org_id": org_id,
+            "sequence_id": body.sequence_id,
+            "script_set_id": body.script_set_id,
+        }
+        if body.template_sequence_ids is not None:
+            campaign_args.update(
+                template_sequence_ids=body.template_sequence_ids,
+            )
+        if body.script_set_ids is not None:
+            campaign_args.update(script_set_ids=body.script_set_ids)
         cid = db.create_campaign(
-            body.name,
-            steps,
-            body.lead_ids,
-            notes=body.notes,
-            org_id=org_id,
-            sequence_id=body.sequence_id,
-            script_set_id=body.script_set_id,
+            body.name, steps, body.lead_ids, **campaign_args,
         )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     return {"id": cid}
+
+
+class CampaignTemplateOptionsBody(BaseModel):
+    template_sequence_ids: List[int] = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def require_unique_sequences(self):
+        if len(set(self.template_sequence_ids)) != len(self.template_sequence_ids):
+            raise ValueError("A template sequence cannot be selected more than once.")
+        return self
+
+
+@router.get("/campaigns/{campaign_id}/template-options")
+def get_campaign_template_options(
+    campaign_id: int,
+    org_id: str = Depends(get_org_id),
+):
+    result = db.list_campaign_template_options(campaign_id, org_id=org_id)
+    if result is None:
+        raise HTTPException(status_code=404, detail="Campaign not found")
+    return result
+
+
+@router.put("/campaigns/{campaign_id}/template-options")
+def update_campaign_template_options(
+    campaign_id: int,
+    body: CampaignTemplateOptionsBody,
+    org_id: str = Depends(require_org_admin),
+):
+    try:
+        updated = db.set_campaign_template_options(
+            campaign_id,
+            body.template_sequence_ids,
+            org_id=org_id,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    if not updated:
+        raise HTTPException(status_code=404, detail="Campaign not found")
+    return {"ok": True}
+
+
+class CampaignEnrollmentBody(BaseModel):
+    lead_ids: List[int] = Field(min_length=1)
+
+
+@router.post("/campaigns/{campaign_id}/enroll")
+def enroll_campaign_leads(
+    campaign_id: int,
+    body: CampaignEnrollmentBody,
+    org_id: str = Depends(get_org_id),
+):
+    try:
+        result = db.enroll_campaign_leads(
+            campaign_id, body.lead_ids, org_id=org_id,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    if result is None:
+        raise HTTPException(status_code=404, detail="Campaign not found")
+    return result
 
 
 @router.patch("/campaigns/{campaign_id}/status")
@@ -331,6 +454,11 @@ class AccountCreate(BaseModel):
     smtp_user: Optional[str] = None
     smtp_password: Optional[str] = None
     smtp_use_tls: bool = True
+    imap_host: Optional[str] = None
+    imap_port: int = 993
+    imap_user: Optional[str] = None
+    imap_password: Optional[str] = None
+    imap_mailbox: str = "INBOX"
     daily_limit: int = 50
     hourly_limit: int = 10
     warmup_days: int = 0
@@ -346,6 +474,11 @@ class AccountUpdate(BaseModel):
     smtp_user: Optional[str] = None
     smtp_password: Optional[str] = None
     smtp_use_tls: Optional[bool] = None
+    imap_host: Optional[str] = None
+    imap_port: Optional[int] = None
+    imap_user: Optional[str] = None
+    imap_password: Optional[str] = None
+    imap_mailbox: Optional[str] = None
     daily_limit: Optional[int] = None
     hourly_limit: Optional[int] = None
     warmup_days: Optional[int] = None
@@ -377,6 +510,9 @@ def create_account(body: AccountCreate, org_id: str = Depends(require_org_admin)
             reply_to=body.reply_to, smtp_port=body.smtp_port,
             smtp_user=body.smtp_user, smtp_password=body.smtp_password,
             smtp_use_tls=body.smtp_use_tls,
+            imap_host=body.imap_host, imap_port=body.imap_port,
+            imap_user=body.imap_user, imap_password=body.imap_password,
+            imap_mailbox=body.imap_mailbox,
             daily_limit=body.daily_limit, hourly_limit=body.hourly_limit,
             warmup_days=body.warmup_days,
         )
@@ -438,6 +574,51 @@ def test_account(account_id: int, org_id: str = Depends(require_org_admin)):
         result["errors"].append(f"SMTP: {e}")
 
     return result
+
+
+@router.post("/accounts/{account_id}/test-imap")
+def test_imap_account(account_id: int, org_id: str = Depends(require_org_admin)):
+    """Verify IMAP credentials and mailbox access without changing messages."""
+    import imaplib
+    import ssl
+
+    from inbox import IMAPConfig
+
+    account = db.get_email_account(account_id, org_id=org_id, decrypt=True)
+    if not account:
+        raise HTTPException(status_code=404, detail="Sender account not found")
+
+    config = IMAPConfig.from_account(account)
+    if not config.ready:
+        raise HTTPException(
+            status_code=400,
+            detail="IMAP is not configured. Provide the inbox host, username, and password.",
+        )
+
+    connection = None
+    try:
+        connection = imaplib.IMAP4_SSL(
+            config.host,
+            config.port,
+            ssl_context=ssl.create_default_context(),
+            timeout=15,
+        )
+        connection.login(config.username, config.password)
+        status, _ = connection.select(config.mailbox, readonly=True)
+        if status != "OK":
+            raise RuntimeError(f"Could not open IMAP mailbox {config.mailbox!r}.")
+        return {"imap_ok": True, "mailbox": config.mailbox}
+    except Exception as exc:
+        raise HTTPException(
+            status_code=502,
+            detail=f"IMAP connection failed: {str(exc)[:250]}",
+        ) from exc
+    finally:
+        if connection is not None:
+            try:
+                connection.logout()
+            except (imaplib.IMAP4.error, OSError):
+                pass
 
 
 @router.post("/accounts/{account_id}/send-test")
@@ -509,9 +690,6 @@ def outreach_limits(org_id: str = Depends(get_org_id)):
         "max_per_hour":  _env_int("SEND_MAX_PER_HOUR"),
         "max_emails_per_minute": max_emails_per_minute,
         "hourly_allocation_limit": hourly_allocation_limit,
-        "send_max_per_domain_per_hour": db.get_send_max_per_domain_per_hour(
-            org_id=org_id,
-        ),
         "send_jitter_max_seconds": db.get_send_jitter_max_seconds(org_id=org_id),
         "effective_hourly_allocation_limit": min(
             hourly_allocation_limit,
@@ -676,18 +854,6 @@ def list_threads(
     return db.list_threads(intent=intent, limit=limit, org_id=org_id)
 
 
-@router.get("/threads/inbox")
-def list_reply_inbox(
-    limit: int = 100,
-    org_id: str = Depends(get_org_id),
-):
-    """List all organization-scoped conversations with received replies."""
-    limit = max(1, min(limit, 200))
-    return db.list_threads(
-        limit=limit, org_id=org_id, inbound_only=True,
-    )
-
-
 @router.get("/threads/{thread_id}")
 def get_thread(thread_id: int, org_id: str = Depends(get_org_id)):
     thread = db.get_thread(thread_id, org_id=org_id)
@@ -706,7 +872,8 @@ class DraftBody(BaseModel):
 
 @router.post("/threads/{thread_id}/draft")
 def generate_draft(thread_id: int, body: DraftBody, org_id: str = Depends(get_org_id)):
-    """Gemini-draft a reply to this thread and save it for approval."""
+    """Gemini-draft a reply to this thread (same flow as the Streamlit
+    Negotiator page). Saved as a pending negotiation_draft for approve/send."""
     import os
 
     from email_text import strip_quotes

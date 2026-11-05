@@ -20,3 +20,6 @@ python-multipart>=0.0.9            # form data support
 # Data + utilities
 pandas>=2.0.0
 requests>=2.31.0
+
+# Legacy Streamlit (keep while transitioning to Next.js)
+streamlit>=1.35.0

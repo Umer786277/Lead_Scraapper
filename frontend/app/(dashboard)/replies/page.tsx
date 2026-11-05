@@ -17,6 +17,7 @@ type Draft = Record<string, unknown> & { id?: number };
 
 export default function RepliesPage() {
   const [threads, setThreads] = useState<ThreadItem[]>([]);
+  const [replyFilter, setReplyFilter] = useState<"all" | "needs_info">("all");
   const [selected, setSelected] = useState<ThreadItem | null>(null);
   const [messages, setMessages] = useState<ThreadMessage[]>([]);
   const [draft, setDraft] = useState<Draft | null>(null);
@@ -31,7 +32,7 @@ export default function RepliesPage() {
 
   async function loadThreads() {
     try {
-      const items = await api.outreach.threads.inbox();
+      const items = await api.outreach.threads.list(undefined, 200);
       setThreads(items);
       setError("");
     } catch (e) {
@@ -65,7 +66,7 @@ export default function RepliesPage() {
   }
 
   async function generateDraft() {
-    if (!selected) return;
+    if (!selected || selected.last_intent !== "needs_info") return;
     setDraftBusy(true);
     setError("");
     try {
@@ -121,7 +122,7 @@ export default function RepliesPage() {
     let active = true;
     (async () => {
       try {
-        const items = await api.outreach.threads.inbox();
+        const items = await api.outreach.threads.list(undefined, 200);
         if (active) {
           setThreads(items);
           setError("");
@@ -145,6 +146,13 @@ export default function RepliesPage() {
     bounce: "bg-red-900/30 text-red-400",
     auto_reply: "bg-blue-900/40 text-blue-300",
   };
+  const replies = threads.filter(
+    (thread) => thread.inbound_count > 0 &&
+      (replyFilter === "all" || thread.last_intent === "needs_info")
+  );
+  const needsReplyCount = threads.filter(
+    (thread) => thread.inbound_count > 0 && thread.last_intent === "needs_info"
+  ).length;
 
   return (
     <div className="space-y-6">
@@ -155,7 +163,7 @@ export default function RepliesPage() {
             <Inbox className="text-indigo-400" size={24} /> Replies
           </h1>
           <p className="text-slate-400 text-sm mt-1">
-            All received customer replies for this organization, with their classifications and conversation history.
+            All matched incoming email replies and their classifications.
           </p>
         </div>
         <button
@@ -177,21 +185,38 @@ export default function RepliesPage() {
         <div className="rounded-2xl border border-white/8 bg-white/3 overflow-hidden">
           <div className="px-5 py-4 border-b border-white/5 flex items-center justify-between">
             <p className="text-sm font-semibold text-slate-200 flex items-center gap-2">
-              <MessageSquare size={14} className="text-indigo-400" /> Received replies
+              <MessageSquare size={14} className="text-indigo-400" /> Replies
             </p>
-            <span className="text-xs text-slate-500">{threads.length}</span>
+            <div className="flex items-center gap-3">
+              <button
+                onClick={() => setReplyFilter("all")}
+                aria-pressed={replyFilter === "all"}
+                className={`text-xs ${replyFilter === "all" ? "text-indigo-300" : "text-slate-500 hover:text-slate-300"}`}
+              >
+                All ({threads.filter((thread) => thread.inbound_count > 0).length})
+              </button>
+              <button
+                onClick={() => setReplyFilter("needs_info")}
+                aria-pressed={replyFilter === "needs_info"}
+                className={`text-xs ${replyFilter === "needs_info" ? "text-indigo-300" : "text-slate-500 hover:text-slate-300"}`}
+              >
+                Needs a reply ({needsReplyCount})
+              </button>
+            </div>
           </div>
           <div className="divide-y divide-white/5">
             {loading ? (
               <div className="flex items-center gap-2 px-5 py-8 text-slate-400 text-sm">
                 <Loader2 size={16} className="animate-spin" /> Loading conversations…
               </div>
-            ) : threads.length === 0 ? (
+            ) : replies.length === 0 ? (
               <p className="px-5 py-8 text-slate-500 text-sm">
-                No matched customer replies have been received for this organization yet.
+                {replyFilter === "all"
+                  ? "No matched incoming replies have been received yet."
+                  : "No replies currently need a response."}
               </p>
             ) : (
-              threads.map((t) => (
+              replies.map((t) => (
                 <button
                   key={t.id}
                   onClick={() => loadDetail(t)}
@@ -221,13 +246,8 @@ export default function RepliesPage() {
                   </p>
                   <div className="flex items-center gap-3 mt-2">
                     <span className="text-[11px] text-slate-500 flex items-center gap-1">
-                      <User size={11} /> {t.last_inbound_from || t.email || "—"}
+                      <User size={11} /> {t.email || "—"}
                     </span>
-                    {t.last_inbound_at && (
-                      <span className="text-[11px] text-slate-500">
-                        {new Date(t.last_inbound_at).toLocaleString()}
-                      </span>
-                    )}
                     {t.pending_drafts > 0 && (
                       <span className="text-[11px] text-indigo-300 flex items-center gap-1">
                         <Sparkles size={11} /> draft ready
@@ -291,12 +311,6 @@ export default function RepliesPage() {
                           {String(m.created_at).replace("T", " ").slice(0, 16)}
                         </span>
                       </div>
-                      {(m.from_addr || m.to_addr) && (
-                        <p className="text-[11px] text-slate-500 mb-1">
-                          From: {m.from_addr || "—"}
-                          {m.to_addr ? ` · To: ${m.to_addr}` : ""}
-                        </p>
-                      )}
                       {m.subject && <p className="text-xs text-slate-400 mb-1">{m.subject}</p>}
                       <p className="whitespace-pre-wrap">{m.body || ""}</p>
                     </div>
@@ -306,7 +320,11 @@ export default function RepliesPage() {
 
               {/* Draft area */}
               <div className="border-t border-white/5 px-5 py-4 space-y-3">
-                {!draft ? (
+                {selected.last_intent !== "needs_info" ? (
+                  <p className="text-sm text-slate-500">
+                    This reply is available for review. Drafting is reserved for replies classified as needing information.
+                  </p>
+                ) : !draft ? (
                   <button
                     onClick={generateDraft}
                     disabled={draftBusy || messages.length === 0}

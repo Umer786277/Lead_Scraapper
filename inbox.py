@@ -18,9 +18,7 @@ pool afterwards so a slow LLM call can't stall the poll.
 """
 
 import email
-import hashlib
 import imaplib
-import logging
 import os
 import re
 import ssl
@@ -62,7 +60,6 @@ _BOUNCE_FROM_RE = re.compile(
 )
 
 AUTO_REPLY_DELAY_DAYS = 7   # how far to push the sequence on an OOO hit
-log = logging.getLogger(__name__)
 
 
 def _is_auto_reply(msg) -> bool:
@@ -245,22 +242,25 @@ def _find_lead_for_reply(parent_msg_ids, from_addr=None, subject=None, org_id=No
     return row["lead_id"], dict(row)
 
 
-def _triage_reply(lead_id, subject, body, org_id=None):
+def _triage_reply(lead_id, subject, body):
     """Classify a just-received reply so the sequence can react intelligently.
 
-    The classifier itself falls back to intent="other" when the LLM is
-    unavailable; database errors must propagate so durable processing retries.
+    Falls back to intent="other" (treated as "stop and let a human handle
+    it", the old blanket behavior) if the LLM call fails or isn't configured.
     """
-    from llm import classify_reply
+    fallback = {"intent": "other", "follow_up_days": None, "reasoning": ""}
+    try:
+        from llm import classify_reply
 
-    lead = db.get_lead(lead_id, org_id=org_id) or {}
-    thread_id = db.get_or_create_thread(lead_id, subject=subject, org_id=org_id)
-    history = [
-        {"direction": m["direction"], "subject": m["subject"],
-         "body": _strip_quotes(m["body"])}
-        for m in db.thread_messages(thread_id)
-    ]
-    return classify_reply(lead, history)
+        lead = db.get_lead(lead_id) or {}
+        thread_id = db.get_or_create_thread(lead_id, subject=subject)
+        history = [
+            {"direction": m["direction"], "subject": m["subject"], "body": _strip_quotes(m["body"])}
+            for m in db.thread_messages(thread_id)
+        ]
+        return classify_reply(lead, history)
+    except Exception:
+        return fallback
 
 
 def _send_booking_reply(lead_id, thread_id, parent_message_id, parent_references,
@@ -281,7 +281,7 @@ def _send_booking_reply(lead_id, thread_id, parent_message_id, parent_references
     if not lead.get("email"):
         return
 
-    from outreach import booking_reply_body, enqueue_outbound
+    from outreach import booking_reply_body
 
     reply_subject = subject if subject.lower().startswith("re:") else f"Re: {subject}"
     reference_bits = f"{parent_references} {parent_message_id}".strip()
@@ -333,7 +333,7 @@ def drain_pending_replies(smtp=None, send_from_addr=None, booking_link=None,
     """
     if not booking_link:
         return 0
-    from outreach import booking_reply_body, enqueue_outbound
+    from outreach import booking_reply_body
 
     queued = 0
     for row in db.due_pending_replies(limit=limit, org_id=org_id):
@@ -368,265 +368,203 @@ def drain_pending_replies(smtp=None, send_from_addr=None, booking_link=None,
             db.mark_pending_reply(row["id"], "failed", error=str(e)[:300], org_id=org_id)
     return queued
 
-def _source_key(cfg, account_id=None):
-    if account_id is not None:
-        return f"account:{account_id}"
-    identity = f"{cfg.host.lower()}:{cfg.port}:{cfg.username.lower()}:{cfg.mailbox}"
-    return "env:" + hashlib.sha256(identity.encode("utf-8")).hexdigest()
-
-
-def _uid_validity(connection):
-    response, values = connection.response("UIDVALIDITY")
-    if not values or not values[0]:
-        raise RuntimeError(f"IMAP server did not return UIDVALIDITY (response={response!r}).")
-    try:
-        return int(values[0])
-    except (TypeError, ValueError) as exc:
-        raise RuntimeError(f"IMAP server returned invalid UIDVALIDITY: {values[0]!r}.") from exc
-
-
-def _raw_from_fetch(data):
-    for part in data or ():
-        if isinstance(part, tuple) and len(part) > 1 and isinstance(part[1], bytes):
-            return part[1]
-    return None
-
-
-def _react_to_inbound(item, smtp, send_from_addr, booking_link, org_id):
-    lead_id = item["lead_id"]
-    thread_id = item["thread_id"]
-    subject = item["subject"]
-    message_id = item["message_id"]
-    matched = item["matched_event"]
-
-    if _is_bounce(item["msg"]):
-        db.cancel_future_sends_for_lead(lead_id, org_id=org_id)
-        bounced_lead = db.get_lead(lead_id, org_id=org_id) or {}
-        if bounced_lead.get("email"):
-            db.add_suppression(org_id, bounced_lead["email"], reason="bounce", source="inbox")
-        db.update_lead_status(
-            lead_id, "dead",
-            note="Delivery failure (mailer-daemon) — verify this address",
-            org_id=org_id,
-        )
-        db.log_event(
-            lead_id=lead_id, event_type="bounce", subject=subject,
-            message_id=message_id, note="Bounced — daemon delivery failure",
-            org_id=org_id,
-        )
-        db.set_thread_last_intent(thread_id, "bounce", org_id=org_id)
-        return "bounce"
-
-    if _is_auto_reply(item["msg"]):
-        db.push_pending_sends_for_lead(lead_id, AUTO_REPLY_DELAY_DAYS, org_id=org_id)
-        db.update_lead_status(
-            lead_id, "snoozed",
-            note=f"Auto-reply/OOO detected — sequence paused {AUTO_REPLY_DELAY_DAYS}d",
-            org_id=org_id,
-        )
-        db.log_event(
-            lead_id=lead_id, event_type="auto_reply", subject=subject,
-            message_id=message_id,
-            note="Auto-responder/OOO — treated as bad timing", org_id=org_id,
-        )
-        db.set_thread_last_intent(thread_id, "auto_reply", org_id=org_id)
-        return "auto_reply"
-
-    triage = _triage_reply(
-        lead_id, subject, _strip_quotes(item["body"]), org_id=org_id,
-    )
-    db.set_thread_last_intent(thread_id, triage["intent"], org_id=org_id)
-    if triage["intent"] == "bad_timing" and triage["follow_up_days"]:
-        db.push_pending_sends_for_lead(
-            lead_id, triage["follow_up_days"], org_id=org_id,
-        )
-        db.update_lead_status(
-            lead_id, "snoozed",
-            note=f"Reply triage: bad_timing, resuming in {triage['follow_up_days']}d — "
-                 f"{triage['reasoning']}",
-            org_id=org_id,
-        )
-    else:
-        db.cancel_future_sends_for_lead(lead_id, org_id=org_id)
-        new_status = (
-            "dead" if triage["intent"] in ("not_interested", "unsubscribe")
-            else "replied"
-        )
-        db.update_lead_status(
-            lead_id, new_status,
-            note=(f"Reply triage: {triage['intent']} — {triage['reasoning']}"
-                  if triage["reasoning"] else None),
-            org_id=org_id,
-        )
-        if triage["intent"] == "unsubscribe":
-            replied_lead = db.get_lead(lead_id, org_id=org_id) or {}
-            if replied_lead.get("email"):
-                db.add_suppression(
-                    org_id, replied_lead["email"],
-                    reason="unsubscribe", source="inbox",
-                )
-        if triage["intent"] == "interested":
-            _send_booking_reply(
-                lead_id, thread_id, message_id, item["references"],
-                subject, smtp, send_from_addr, booking_link, org_id=org_id,
-            )
-    db.log_event(
-        lead_id=lead_id, event_type="replied", subject=subject,
-        message_id=message_id,
-        note=f"Reply to: {matched['subject'] if matched else ''} [{triage['intent']}]",
-        org_id=org_id,
-    )
-    return triage["intent"]
-
-
-def _process_inbound_row(row, smtp, send_from_addr, booking_link, org_id):
-    try:
-        raw = bytes(row["raw_message"])
-        msg = email.message_from_bytes(raw)
-        message_id = _decode_header(msg.get("Message-ID"))
-        in_reply_to = _decode_header(msg.get("In-Reply-To"))
-        references = _decode_header(msg.get("References"))
-        subject = _decode_header(msg.get("Subject"))
-        from_addr = _decode_header(msg.get("From"))
-        to_addr = _decode_header(msg.get("To"))
-        body = _extract_text_body(msg)
-
-        stable_message_id = message_id or (
-            f"<imap-{row['source_key']}-{row['uid_validity']}-{row['uid']}@local>"
-        )
-        parent_ids = _extract_parent_ids(in_reply_to, references)
-        lead_id, matched_event = _find_lead_for_reply(
-            parent_ids, from_addr, subject, org_id=org_id,
-        )
-        if not lead_id:
-            db.mark_inbound_message(row["id"], "ignored")
-            return None
-
-        thread_id = db.get_or_create_thread(lead_id, subject=subject, org_id=org_id)
-        db.insert_thread_message(
-            thread_id=thread_id,
-            direction="inbound",
-            subject=subject,
-            body=body,
-            message_id=stable_message_id,
-            in_reply_to=matched_event["message_id"] if matched_event else None,
-            from_addr=from_addr,
-            to_addr=to_addr,
-        )
-        item = {
-            "lead_id": lead_id,
-            "thread_id": thread_id,
-            "subject": subject,
-            "body": body,
-            "msg": msg,
-            "message_id": stable_message_id,
-            "references": references,
-            "matched_event": matched_event,
-        }
-        intent = _react_to_inbound(
-            item, smtp, send_from_addr, booking_link, org_id,
-        )
-        db.mark_inbound_message(row["id"], "processed")
-        return {
-            "lead_id": lead_id,
-            "thread_id": thread_id,
-            "subject": subject,
-            "from_addr": from_addr,
-            "matched_msg_id": matched_event["message_id"] if matched_event else None,
-            "intent": intent,
-        }
-    except Exception as exc:
-        status = db.mark_inbound_message(row["id"], "retry", error=str(exc))
-        log.exception(
-            "Inbound message %s processing failed (state=%s)",
-            row["id"], status,
-        )
-        return {
-            "lead_id": None,
-            "thread_id": None,
-            "subject": None,
-            "from_addr": None,
-            "matched_msg_id": None,
-            "intent": None,
-            "error": str(exc)[:300],
-        }
-
-
 def check_inbox(cfg, limit=50, mark_seen=True, on_progress=None,
                  smtp=None, send_from_addr=None, booking_link=None,
                  max_triage_workers=4, org_id=None, account_id=None):
-    """Fetch new messages by IMAP UID, persist raw input, then triage durably."""
+    """
+    Connect, scan UNSEEN messages, match to our sent emails, store replies.
+
+    Two phases, so the (LLM-bound) triage never holds the IMAP connection open:
+      1. fetch + parse + store every matched reply, mark \\Seen
+      2. react to each reply in a worker pool — header-based bounce/OOO
+         detection first, then Gemini intent triage, status transitions and
+         the optional booking auto-reply.
+
+    smtp/send_from_addr/booking_link are optional — when all three are set, a
+    reply triaged as 'interested' gets an automatic booking-link reply sent
+    back (once per lead). Omit any of them to disable auto-reply and keep
+    the old behavior (status update only, human sends the link manually).
+    (Named send_from_addr, not from_addr, because from_addr is already used
+    below for the inbound message's From header.)
+
+    Returns a summary list:
+    [{lead_id, thread_id, subject, from_addr, matched_msg_id, intent}]
+    where intent is 'bounce' | 'auto_reply' | any of the LLM intents.
+    """
     if not cfg.ready:
         raise RuntimeError("IMAP config incomplete — need host, username, password.")
-    if limit < 1:
-        raise ValueError("limit must be at least 1.")
 
-    source_key = _source_key(cfg, account_id)
-    uid_validity = None
-    last_uid = 0
-    connection = imaplib.IMAP4_SSL(
-        cfg.host, cfg.port, ssl_context=ssl.create_default_context(),
-    )
+    results = []
+    pending = []
+    ctx = ssl.create_default_context()
+    m = imaplib.IMAP4_SSL(cfg.host, cfg.port, ssl_context=ctx)
     try:
-        connection.login(cfg.username, cfg.password)
-        selected, _ = connection.select(cfg.mailbox)
-        if selected != "OK":
-            raise RuntimeError(f"Could not select IMAP mailbox {cfg.mailbox!r}.")
-        uid_validity = _uid_validity(connection)
-        last_uid = db.get_imap_cursor(
-            org_id, source_key, cfg.mailbox, uid_validity,
-        )
-        status, data = connection.uid(
-            "search", None, f"{last_uid + 1}:*",
-        )
+        m.login(cfg.username, cfg.password)
+        m.select(cfg.mailbox)
+        status, data = m.search(None, "UNSEEN")
         if status != "OK":
-            raise RuntimeError(f"IMAP UID search failed: {data!r}")
+            return results
+        ids = data[0].split()[:limit]
 
-        uids = sorted({
-            int(value) for value in (data[0].split() if data else ())
-            if value.isdigit() and int(value) > last_uid
-        })[:limit]
-        persisted_uid = last_uid
-        for index, uid in enumerate(uids, 1):
+        # Phase 1 — parse + store while the IMAP connection is open, but ONLY
+        # the fast stuff (header parsing, DB insert). No LLM calls here, which
+        # keeps the session short and the poll cheap.
+        for idx, num in enumerate(ids, 1):
             if on_progress:
-                on_progress(index, len(uids))
-            fetched, message_data = connection.uid(
-                "fetch", str(uid), "(RFC822)",
+                on_progress(idx, len(ids))
+            status, msg_data = m.fetch(num, "(RFC822)")
+            if status != "OK" or not msg_data or not msg_data[0]:
+                continue
+
+            raw = msg_data[0][1]
+            msg = email.message_from_bytes(raw)
+
+            message_id  = _decode_header(msg.get("Message-ID"))
+            in_reply_to = _decode_header(msg.get("In-Reply-To"))
+            references  = _decode_header(msg.get("References"))
+            subject     = _decode_header(msg.get("Subject"))
+            from_addr   = _decode_header(msg.get("From"))
+            to_addr     = _decode_header(msg.get("To"))
+            body        = _extract_text_body(msg)
+
+            parent_ids = _extract_parent_ids(in_reply_to, references)
+            lead_id, matched_event = _find_lead_for_reply(parent_ids, from_addr, subject, org_id=org_id)
+            if not lead_id:
+                continue  # not a reply to anything we sent — ignore
+
+            thread_id = db.get_or_create_thread(lead_id, subject=subject, org_id=org_id)
+            db.insert_thread_message(
+                thread_id=thread_id,
+                direction="inbound",
+                subject=subject,
+                body=body,
+                message_id=message_id,
+                in_reply_to=matched_event["message_id"] if matched_event else None,
+                from_addr=from_addr,
+                to_addr=to_addr,
             )
-            raw = _raw_from_fetch(message_data)
-            if fetched != "OK" or raw is None:
-                break
-            db.persist_inbound_message(
-                org_id, source_key, cfg.mailbox, uid_validity, uid, raw,
-            )
-            persisted_uid = uid
+
+            # Mark seen immediately so a slow triage never makes us re-process
+            # the same reply on the next poll.
             if mark_seen:
-                connection.uid("store", str(uid), "+FLAGS", "\\Seen")
-        if persisted_uid > last_uid:
-            db.advance_imap_cursor(
-                org_id, source_key, cfg.mailbox, uid_validity, persisted_uid,
-            )
+                m.store(num, "+FLAGS", "\\Seen")
+
+            pending.append({
+                "lead_id":        lead_id,
+                "thread_id":      thread_id,
+                "subject":        subject,
+                "body":           body,
+                "msg":            msg,
+                "message_id":     message_id,
+                "references":     references,
+                "matched_event":  matched_event,
+            })
+            results.append({
+                "lead_id":       lead_id,
+                "thread_id":     thread_id,
+                "subject":       subject,
+                "from_addr":     from_addr,
+                "matched_msg_id": matched_event["message_id"] if matched_event else None,
+                "account_id":    account_id,
+            })
     finally:
         try:
-            connection.close()
-        except (imaplib.IMAP4.error, OSError):
-            log.debug("IMAP mailbox close failed", exc_info=True)
+            m.close()
+        except Exception:
+            pass
         try:
-            connection.logout()
-        except (imaplib.IMAP4.error, OSError):
-            log.debug("IMAP logout failed", exc_info=True)
+            m.logout()
+        except Exception:
+            pass
 
-    rows = db.claim_inbound_messages(
-        org_id, source_key, cfg.mailbox, limit=limit,
-    )
-    if not rows:
-        return []
-    workers = max(1, min(max_triage_workers, len(rows)))
-    with ThreadPoolExecutor(max_workers=workers) as executor:
-        processed = list(executor.map(
-            lambda row: _process_inbound_row(
-                row, smtp, send_from_addr, booking_link, org_id,
-            ),
-            rows,
-        ))
-    return [result for result in processed if result is not None]
+    # Phase 2 — react to each reply WITHOUT holding the IMAP connection.
+    # Auto-replies/bounces are decided by headers (no LLM). Everything else
+    # goes through Gemini triage; running it in parallel means one slow call
+    # can't gate the rest of the batch.
+    def _react(item):
+        lead_id   = item["lead_id"]
+        thread_id = item["thread_id"]
+        subject   = item["subject"]
+        message_id = item["message_id"]
+        matched   = item["matched_event"]
+
+        if _is_bounce(item["msg"]):
+            db.cancel_future_sends_for_lead(lead_id, org_id=org_id)
+            bounced_lead = db.get_lead(lead_id, org_id=org_id) or {}
+            if bounced_lead.get("email"):
+                db.add_suppression(
+                    org_id, bounced_lead["email"], reason="bounce", source="inbox",
+                )
+            db.update_lead_status(
+                lead_id, "dead",
+                note="Delivery failure (mailer-daemon) — verify this address",
+                org_id=org_id,
+            )
+            db.log_event(lead_id=lead_id, event_type="bounce",
+                         subject=subject, message_id=message_id,
+                         note="Bounced — daemon delivery failure", org_id=org_id)
+            db.set_thread_last_intent(thread_id, "bounce", org_id=org_id)
+            return "bounce"
+
+        if _is_auto_reply(item["msg"]):
+            db.push_pending_sends_for_lead(lead_id, AUTO_REPLY_DELAY_DAYS, org_id=org_id)
+            db.update_lead_status(
+                lead_id, "snoozed",
+                note=f"Auto-reply/OOO detected — sequence paused {AUTO_REPLY_DELAY_DAYS}d",
+                org_id=org_id,
+            )
+            db.log_event(lead_id=lead_id, event_type="auto_reply",
+                         subject=subject, message_id=message_id,
+                         note="Auto-responder/OOO — treated as bad timing", org_id=org_id)
+            db.set_thread_last_intent(thread_id, "auto_reply", org_id=org_id)
+            return "auto_reply"
+
+        triage = _triage_reply(lead_id, subject, _strip_quotes(item["body"]))
+        db.set_thread_last_intent(thread_id, triage["intent"], org_id=org_id)
+        if triage["intent"] == "bad_timing" and triage["follow_up_days"]:
+            db.push_pending_sends_for_lead(lead_id, triage["follow_up_days"], org_id=org_id)
+            db.update_lead_status(
+                lead_id, "snoozed",
+                note=f"Reply triage: bad_timing, resuming in {triage['follow_up_days']}d — {triage['reasoning']}",
+                org_id=org_id,
+            )
+        else:
+            db.cancel_future_sends_for_lead(lead_id, org_id=org_id)
+            new_status = "dead" if triage["intent"] in ("not_interested", "unsubscribe") else "replied"
+            db.update_lead_status(
+                lead_id, new_status,
+                note=f"Reply triage: {triage['intent']} — {triage['reasoning']}" if triage["reasoning"] else None,
+                org_id=org_id,
+            )
+            if triage["intent"] == "unsubscribe":
+                replied_lead = db.get_lead(lead_id, org_id=org_id) or {}
+                if replied_lead.get("email"):
+                    db.add_suppression(
+                        org_id, replied_lead["email"],
+                        reason="unsubscribe", source="inbox",
+                    )
+            if triage["intent"] == "interested":
+                _send_booking_reply(
+                    lead_id, thread_id, message_id, item["references"],
+                    subject, smtp, send_from_addr, booking_link, org_id=org_id,
+                )
+        db.log_event(
+            lead_id=lead_id,
+            event_type="replied",
+            subject=subject,
+            message_id=message_id,
+            note=f"Reply to: {matched['subject'] if matched else ''} [{triage['intent']}]",
+            org_id=org_id,
+        )
+        return triage["intent"]
+
+    intents = []
+    if pending:
+        workers = max(1, min(max_triage_workers, len(pending)))
+        with ThreadPoolExecutor(max_workers=workers) as ex:
+            intents = list(ex.map(_react, pending))
+
+    for i, res in enumerate(results):
+        res["intent"] = intents[i] if i < len(intents) else None
+
+    return results

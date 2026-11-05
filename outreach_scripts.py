@@ -27,7 +27,11 @@ def select_script_variant(mode, scripts, rotation_index=0, rotation_order=None):
             first_choices = [
                 index for index in range(script_count) if index != previous_last
             ]
-            first = random.choice(first_choices)
+            first = (
+                random.choice(first_choices)
+                if first_choices
+                else random.randrange(script_count)
+            )
             remaining = [
                 index for index in range(script_count) if index != first
             ]

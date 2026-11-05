@@ -174,7 +174,7 @@ class CampaignScriptAssignmentTests(unittest.TestCase):
         assign.assert_called_once_with(connection, 13, 101, "org-1")
         self.assertEqual(connection.updated_script_names, ["First"])
         self.assertIn(
-            "ORDER BY s.scheduled_at ASC, s.id ASC FOR UPDATE OF s, c SKIP LOCKED",
+            "ORDER BY s.scheduled_at ASC, s.id ASC FOR UPDATE OF s SKIP LOCKED",
             connection.queries[0],
         )
         self.assertEqual(items[0]["subject"], "Variant subject")

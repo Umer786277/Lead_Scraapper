@@ -310,15 +310,22 @@ class OutreachRateLimitTests(unittest.TestCase):
 
     def test_smtp_throttle_is_persisted_inside_dispatch_slot(self):
         db_now = datetime(2030, 1, 1, tzinfo=timezone.utc)
+        paused_until = db_now + timedelta(minutes=5)
         with patch.object(
             db, "_reserve_outreach_slot",
             return_value=(db_now, db_now + timedelta(minutes=1), db_now),
-        ), patch.object(db.time, "monotonic", side_effect=(0, 0)):
-            with self.assertRaises(outreach.smtplib.SMTPDataError) as raised:
+        ), patch.object(db.time, "monotonic", side_effect=(0, 0)), \
+                patch.object(
+                    db, "_extend_outreach_pause", return_value=paused_until,
+                ) as extend_pause:
+            with self.assertRaises(db.OutreachDispatchThrottled) as raised:
                 with db.outreach_dispatch_slot("org-id", 60):
                     raise outreach.smtplib.SMTPDataError(451, b"try later")
 
         self.assertEqual(raised.exception.smtp_code, 451)
+        self.assertEqual(raised.exception.paused_until, paused_until)
+        extend_pause.assert_called_once()
+        self.assertEqual(extend_pause.call_args.args[1], "org-id")
 
     def test_exception_classification(self):
         import smtplib

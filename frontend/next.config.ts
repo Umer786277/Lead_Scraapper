@@ -4,8 +4,7 @@ const API_URL = process.env.API_URL ?? process.env.NEXT_PUBLIC_API_URL ?? "http:
 
 const nextConfig: NextConfig = {
   allowedDevOrigins: [
-    "192.168.100.164",
-    "192.168.1.4",
+    "192.168.1.28",
     "localhost",
   ],
   turbopack: {

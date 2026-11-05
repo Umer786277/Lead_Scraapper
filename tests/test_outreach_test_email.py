@@ -80,6 +80,16 @@ class OutreachTestEmailTests(unittest.TestCase):
         self.assertEqual(raised.exception.status_code, 404)
         send.assert_not_called()
 
+    def test_list_templates_seeds_default_templates_when_missing(self):
+        with patch.object(outreach, "seed_default_templates") as seed, patch.object(
+            outreach_api.db, "list_templates", return_value=[{"id": 1, "step_number": 1}]
+        ) as list_templates:
+            result = outreach_api.list_templates(org_id="org-1")
+
+        self.assertEqual(result, [{"id": 1, "step_number": 1}])
+        seed.assert_called_once_with(org_id="org-1")
+        list_templates.assert_called_once_with(org_id="org-1")
+
     def test_reports_smtp_failure_without_recording_a_send(self):
         body = outreach_api.TestEmailBody(
             to_email="owner@example.com",

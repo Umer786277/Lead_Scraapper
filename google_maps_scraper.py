@@ -38,29 +38,11 @@ MAX_LEADS_PER_SEARCH = 50    # How many leads per search (max ~60)
 OUTPUT_FILE = "leads_output.xlsx"
 HEADLESS = True              # Set False to watch the browser (good for debugging)
 
+# When an exact-city query returns fewer than this many listings, retry with
+# a "near <city>" query so small towns still surface the surrounding metro.
+BROADEN_BELOW = 5
+
 # ============================================================
-
-
-def scroll_results_panel(page, max_leads):
-    """Scroll the left panel to load more results."""
-    scrollable = page.query_selector('div[role="feed"]')
-    if not scrollable:
-        return
-    prev_count = 0
-    stale_rounds = 0
-    for _ in range(15):
-        scrollable.evaluate('(el) => { el.scrollTop = el.scrollHeight; }')
-        page.wait_for_timeout(900)
-        items = page.query_selector_all('div[role="feed"] a.hfpxzc')
-        if len(items) >= max_leads:
-            break
-        if len(items) == prev_count:
-            stale_rounds += 1
-            if stale_rounds >= 2:
-                break
-        else:
-            stale_rounds = 0
-        prev_count = len(items)
 
 
 def clean_website_url(url):
@@ -224,54 +206,148 @@ def scrape_place_details(page, url):
     return details
 
 
-def search_google_maps(niche, city, country, max_leads, page):
-    """Search Google Maps and collect lead URLs."""
-    query = f"{niche} in {city}, {country}"
-    search_url = f"https://www.google.com/maps/search/{query.replace(' ', '+')}"
+def _listing_links(page):
+    """Return the listing anchors currently rendered in the results feed."""
+    links = page.query_selector_all('div[role="feed"] a.hfpxzc')
+    links += page.query_selector_all('div[role="feed"] a[href*="/maps/place/"]')
+    if not links:
+        links = page.query_selector_all('a.hfpxzc')
+    return links
 
-    print(f"\n🔍 Searching: {query}")
-    print(f"   URL: {search_url}")
 
-    try:
-        page.goto(search_url, wait_until="domcontentloaded", timeout=30000)
-
-        # Handle consent/cookie popup if it appears
+def _append_listing_urls(page, urls, seen, max_leads):
+    """Capture URLs from the cards currently in the DOM."""
+    for link in _listing_links(page):
         try:
-            consent_btn = page.query_selector('button[aria-label*="Accept"], form[action*="consent"] button')
-            if consent_btn:
-                consent_btn.click()
-        except:
-            pass
+            href = link.get_attribute("href")
+        except Exception:
+            continue
+        if href and "/maps/place/" in href and href not in seen:
+            seen.add(href)
+            urls.append(href)
+            if len(urls) >= max_leads:
+                return
 
+
+def _collect_listing_urls(page, max_leads):
+    """Scroll the results feed and collect every listing URL seen.
+
+    Google Maps virtualizes the results list: cards that scroll out of view
+    are removed from the DOM again. Collecting only once after scrolling can
+    therefore miss most results, so capture URLs on every scroll round.
+    """
+    urls = []
+    seen = set()
+    _append_listing_urls(page, urls, seen, max_leads)
+
+    stale_rounds = 0
+    # Each round usually loads another ~20 cards; allow more rounds for
+    # larger targets while bailing out quickly if the feed stops growing.
+    max_rounds = max(15, min(120, (max_leads // 10) + 15))
+    for _ in range(max_rounds):
+        if len(urls) >= max_leads:
+            break
+
+        before = len(urls)
+        feed = page.query_selector('div[role="feed"]')
         try:
-            page.wait_for_selector('div[role="feed"] a.hfpxzc', timeout=10000)
+            if feed:
+                feed.hover(timeout=1000)
+                feed.evaluate("(el) => { el.scrollTop = el.scrollHeight; }")
+            # Wheel over the feed is what actually triggers Maps' lazy loader.
+            page.mouse.wheel(0, 4000)
         except Exception:
             pass
+        page.wait_for_timeout(1200)
+        _append_listing_urls(page, urls, seen, max_leads)
 
-        # Scroll to load more results
-        scroll_results_panel(page, max_leads)
+        if len(urls) == before:
+            stale_rounds += 1
+            if stale_rounds >= 3:
+                break
+        else:
+            stale_rounds = 0
 
-        # Collect all listing URLs
-        listing_links = page.query_selector_all('a.hfpxzc')
-        if not listing_links:
-            listing_links = page.query_selector_all('div[role="feed"] a[href*="/maps/place/"]')
+    return urls[:max_leads]
 
-        urls = []
-        seen = set()
-        for link in listing_links:
-            href = link.get_attribute("href")
-            if href and "/maps/place/" in href and href not in seen:
-                seen.add(href)
-                urls.append(href)
-                if len(urls) >= max_leads:
-                    break
 
-        print(f"   Found {len(urls)} listing URLs")
-        return urls
+def _run_search(page, query, max_leads):
+    """Run one Google Maps query and return its listing URLs."""
+    search_url = f"https://www.google.com/maps/search/{query.replace(' ', '+')}"
+    print(f"   URL: {search_url}")
 
+    page.goto(search_url, wait_until="domcontentloaded", timeout=30000)
+
+    # Handle consent/cookie popup if it appears
+    try:
+        consent_btn = page.query_selector('button[aria-label*="Accept"], form[action*="consent"] button')
+        if consent_btn:
+            consent_btn.click()
+    except Exception:
+        pass
+
+    try:
+        page.wait_for_selector('div[role="feed"] a.hfpxzc', timeout=15000)
+    except Exception:
+        pass
+
+    return _collect_listing_urls(page, max_leads)
+
+
+def search_google_maps(niche, city, country, max_leads, page, broaden=True, on_event=None):
+    """Search Google Maps and collect lead URLs.
+
+    If the exact-city query returns too few listings, retry with a nearby
+    ("near <city>") query so small towns still reach the surrounding metro.
+    """
+    def notify(message):
+        print(message)
+        if on_event:
+            try:
+                on_event("search", message)
+            except Exception:
+                pass
+
+    query = f"{niche} in {city}, {country}"
+    notify(f"\n🔍 Searching: {query}")
+
+    try:
+        urls = _run_search(page, query, max_leads)
     except Exception as e:
-        print(f"   ❌ Search failed: {e}")
-        return []
+        notify(f"   ❌ Search failed: {e}")
+        urls = []
+
+    broaden_below = min(max_leads, BROADEN_BELOW)
+    if broaden and len(urls) < broaden_below:
+        nearby_queries = [
+            f"{niche} near {city}, {country}",
+            f"{niche} near {city}",
+        ]
+        seen = set(urls)
+        for nearby_query in nearby_queries:
+            if len(urls) >= max_leads:
+                break
+            notify(f"   Only {len(urls)} found — broadening search: {nearby_query}")
+            try:
+                extra = _run_search(page, nearby_query, max_leads - len(urls))
+            except Exception as e:
+                notify(f"      broader search failed: {e}")
+                continue
+
+            added = 0
+            for href in extra:
+                if href not in seen:
+                    seen.add(href)
+                    urls.append(href)
+                    added += 1
+                    if len(urls) >= max_leads:
+                        break
+            notify(f"      +{added} from broader search")
+            if added == 0 and len(urls) >= broaden_below:
+                break
+
+    print(f"   Found {len(urls)} listing URLs")
+    return urls
 
 
 def run_scraper(searches=None, max_leads=None, output_file=None, headless=None):

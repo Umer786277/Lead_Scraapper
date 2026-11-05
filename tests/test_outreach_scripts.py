@@ -105,6 +105,31 @@ class ScriptVariantSelectionTests(unittest.TestCase):
         self.assertEqual(order, [0])
         shuffle.assert_called_once_with([0])
 
+    def test_random_with_one_script_wraps_after_cycle(self):
+        only_script = self.scripts[:1]
+        selected, pointer, order = select_script_variant(
+            "random", only_script, 0, [0],
+        )
+        self.assertIs(selected, only_script[0])
+        self.assertEqual(pointer, 1)
+        self.assertEqual(order, [0])
+
+        wrapped, pointer, order = select_script_variant(
+            "random", only_script, pointer, order,
+        )
+        self.assertIs(wrapped, only_script[0])
+        self.assertEqual(pointer, 1)
+        self.assertEqual(order, [0])
+
+    def test_random_with_one_script_recovers_invalid_order(self):
+        only_script = self.scripts[:1]
+        selected, pointer, order = select_script_variant(
+            "random", only_script, 5, [],
+        )
+        self.assertIs(selected, only_script[0])
+        self.assertEqual(pointer, 1)
+        self.assertEqual(order, [0])
+
     def test_invalid_mode_and_empty_variants_are_rejected(self):
         with self.assertRaises(ValueError):
             select_script_variant("round-robin", self.scripts)

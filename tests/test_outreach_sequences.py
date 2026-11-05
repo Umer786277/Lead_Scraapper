@@ -45,6 +45,83 @@ class OutreachSequenceTests(unittest.TestCase):
                 org_id="org-1",
             )
 
+    def test_reversed_template_order_is_rejected_before_updating_sequence(self):
+        connection = Mock()
+        queried_templates = {14: 4, 13: 3, 12: 2, 11: 1}
+
+        def execute(query, params=()):
+            if "SELECT id, step_number FROM email_templates" in query:
+                return Mock(fetchone=Mock(return_value={
+                    "id": params[0],
+                    "step_number": queried_templates[params[0]],
+                }))
+            raise AssertionError(f"Unexpected query after invalid order: {query}")
+
+        connection.execute.side_effect = execute
+        context = MagicMock()
+        context.__enter__.return_value = connection
+
+        with patch.object(db, "get_conn", return_value=context):
+            with self.assertRaisesRegex(ValueError, "out of order"):
+                db.upsert_sequence(
+                    "Existing sequence",
+                    [
+                        {"template_id": 14, "delay_days": 0},
+                        {"template_id": 13, "delay_days": 3},
+                        {"template_id": 12, "delay_days": 3},
+                        {"template_id": 11, "delay_days": 3},
+                    ],
+                    sequence_id=42,
+                    org_id="org-1",
+                )
+
+        self.assertEqual(connection.execute.call_count, 4)
+
+    def test_sequence_creation_persists_each_selected_template_and_delay(self):
+        connection = Mock()
+        inserts = []
+
+        def execute(query, params=()):
+            if "SELECT id, step_number FROM email_templates" in query:
+                template_id = params[0]
+                return Mock(fetchone=Mock(return_value={
+                    "id": template_id,
+                    "step_number": template_id,
+                }))
+            if query.startswith("INSERT INTO outreach_sequences"):
+                return Mock(fetchone=Mock(return_value={"id": 42}))
+            if query.startswith("INSERT INTO outreach_sequence_steps"):
+                inserts.append(params)
+                return Mock()
+            raise AssertionError(f"Unexpected query: {query}")
+
+        connection.execute.side_effect = execute
+        context = MagicMock()
+        context.__enter__.return_value = connection
+
+        with patch.object(db, "get_conn", return_value=context):
+            sequence_id = db.upsert_sequence(
+                "Four ordered steps",
+                [
+                    {"template_id": 1, "delay_days": 0},
+                    {"template_id": 2, "delay_days": 2},
+                    {"template_id": 3, "delay_days": 4},
+                    {"template_id": 4, "delay_days": 5},
+                ],
+                org_id="org-1",
+            )
+
+        self.assertEqual(sequence_id, 42)
+        self.assertEqual(
+            inserts,
+            [
+                (42, 1, 0, 1),
+                (42, 2, 2, 2),
+                (42, 3, 4, 3),
+                (42, 4, 5, 4),
+            ],
+        )
+
     def test_sequence_allows_one_email_and_at_most_four_steps(self):
         single_email = outreach_api.SequenceBody(
             name="Single email",
@@ -61,7 +138,7 @@ class OutreachSequenceTests(unittest.TestCase):
                 ],
             )
 
-    def test_campaign_requires_a_sequence_or_step(self):
+    def test_campaign_requires_an_automation_sequence_or_step(self):
         body = outreach_api.CampaignBody(name="Campaign", lead_ids=[1])
         with self.assertRaises(HTTPException) as raised:
             outreach_api.create_campaign(body, org_id="org-1")

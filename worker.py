@@ -375,28 +375,35 @@ def _on_send_item(item, outcome, detail):
     step = item.get("step_number")
     who = (f"lead #{lead_id} "
            f"({item.get('business_name') or item.get('email') or item.get('to_email') or '?'})")
-    suffix = f" step {step}" if step is not None else ""
-    script_suffix = f" script={item['script_name']}" if item.get("script_name") else ""
+    step_text = step if step is not None else "-"
+    template = item.get("template_name") or "-"
+    script = item.get("script_name") or "-"
+    subject = item.get("subject") or "-"
+    mode = item.get("script_mode") or ("script" if item.get("script_name") else "template")
+    prefix = (
+        f'send: {who} step {step_text} template="{template}" '
+        f'script="{script}" subject="{subject}" mode={mode}'
+    )
     if outcome == "sent":
-        log.info(f"send: {who}{suffix}{script_suffix} -> sent")
+        log.info(f"{prefix} -> sent")
     elif outcome == "failed":
-        log.warning(f"send: {who}{suffix}{script_suffix} -> FAILED: {detail}")
+        log.warning(f"{prefix} -> FAILED: {detail}")
     elif outcome == "unknown":
-        log.warning(f"send: {who}{suffix}{script_suffix} -> UNKNOWN (not retried): {detail}")
+        log.warning(f"{prefix} -> UNKNOWN (not retried): {detail}")
     elif outcome == "retry":
-        log.info(f"send: {who}{suffix}{script_suffix} -> retry scheduled: {detail}")
+        log.info(f"{prefix} -> retry scheduled: {detail}")
     elif outcome == "dead_letter":
-        log.error(f"send: {who}{suffix}{script_suffix} -> dead-lettered: {detail}")
+        log.error(f"{prefix} -> dead-lettered: {detail}")
     elif outcome == "circuit_broken":
-        log.error(f"send: {detail}")
+        log.error(f"{prefix} -> circuit broken: {detail}")
     elif outcome == "no_sender":
-        log.warning(f"send: {detail}")
+        log.warning(f"{prefix} -> no sender: {detail}")
     elif outcome == "skipped":
-        log.debug(f"send: {who}{script_suffix} -> skipped ({detail})")
+        log.debug(f"{prefix} -> skipped ({detail})")
     elif outcome == "deferred":
-        log.debug(f"send: {who} -> deferred ({detail})")
+        log.debug(f"{prefix} -> deferred ({detail})")
     elif outcome == "queued":
-        log.info(f"send: {who}{suffix}{script_suffix} -> queued ({detail})")
+        log.info(f"{prefix} -> queued ({detail})")
 
 def job_send(state: dict):
     """Process due scheduled sends.
@@ -643,7 +650,9 @@ def job_scrape_rotation(state: dict, org_id=None, persist_state=True):
                 max_leads=target,
                 headless=True,
                 enrich_emails=False,
-                on_event=lambda kind, message, **extra: None,
+                on_event=lambda kind, message, **extra: log.info(
+                    "scrape [%s] %s", kind, message.strip()
+                ),
                 org_id=query_org_id,
             )
 

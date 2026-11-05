@@ -22,6 +22,7 @@ from playwright.sync_api import sync_playwright
 
 import db
 import locks
+import run_events
 from email_extractor import extract_from_domain
 from google_maps_scraper import scrape_place_details, search_google_maps
 
@@ -80,7 +81,7 @@ def _email_score(e):
     return conf + category_bonus + source_bonus
 
 
-def run_pipeline(searches, max_leads=20, headless=True, enrich_emails=True, on_event=None, org_id=None):
+def run_pipeline(searches, max_leads=20, headless=True, enrich_emails=True, on_event=None, org_id=None, run_id=None):
     """
     Run the full pipeline:
       1. For each search → scrape Google Maps listings → insert into `leads`
@@ -94,28 +95,35 @@ def run_pipeline(searches, max_leads=20, headless=True, enrich_emails=True, on_e
         enrich_emails: whether to run phase 2
         on_event: callable(kind, message, **extra) for live UI updates
                   kind ∈ {'phase', 'search', 'lead', 'enrich', 'error', 'done'}
+        run_id: reuse an existing extraction_runs row. The API creates the row
+                up front so the UI can poll it while the scrape runs.
 
     Returns:
         {run_id, leads_created, emails_created, domains_scanned, leads: [...]}
     """
     def emit(kind, message, **extra):
+        try:
+            run_events.record(run_id, org_id, kind, message)
+        except Exception:
+            pass
         if on_event:
             try:
                 on_event(kind, message, **extra)
             except Exception:
                 pass
 
-    run_id = db.start_run(
-        "scrape_and_enrich",
-        input_count=len(searches),
-        org_id=org_id,
-        metadata={
-            "max_leads":      max_leads,
-            "headless":       headless,
-            "enrich_emails":  enrich_emails,
-            "searches":       searches,
-        },
-    )
+    if run_id is None:
+        run_id = db.start_run(
+            "scrape_and_enrich",
+            input_count=len(searches),
+            org_id=org_id,
+            metadata={
+                "max_leads":      max_leads,
+                "headless":       headless,
+                "enrich_emails":  enrich_emails,
+                "searches":       searches,
+            },
+        )
 
     leads_created = []
     emails_created = 0
@@ -166,9 +174,9 @@ def run_pipeline(searches, max_leads=20, headless=True, enrich_emails=True, on_e
                 if not (niche and city and country):
                     continue
 
-                emit("search", f"🔍 {niche} in {city}, {country}")
-                urls = search_google_maps(niche, city, country, max_leads, search_page)
-                emit("search", f"   Found {len(urls)} listing URL(s)")
+                urls = search_google_maps(
+                    niche, city, country, max_leads, search_page, on_event=emit,
+                )
 
                 for i, url in enumerate(urls, 1):
                     try:
@@ -320,11 +328,13 @@ def run_pipeline(searches, max_leads=20, headless=True, enrich_emails=True, on_e
 
             browser.close()
 
-        db.finish_run(run_id, output_count=len(leads_created), status="completed", org_id=org_id)
         emit("done", f"Completed run #{run_id}")
+        run_events.flush()
+        db.finish_run(run_id, output_count=len(leads_created), status="completed", org_id=org_id)
     except Exception as e:
-        db.finish_run(run_id, output_count=len(leads_created), status="failed", org_id=org_id)
         emit("error", f"❌ Pipeline failed: {e}")
+        run_events.flush()
+        db.finish_run(run_id, output_count=len(leads_created), status="failed", org_id=org_id)
         raise
 
     return {

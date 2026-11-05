@@ -5,8 +5,6 @@ import {
   type CampaignScriptSet,
   type CampaignScriptSetInput,
   type EmailAccount,
-  type EmailSequence,
-  type EmailSequenceInput,
   type EmailTemplate,
   type ScriptSelectionMode,
 } from "@/lib/api";
@@ -15,7 +13,6 @@ import { useCallback, useEffect, useState } from "react";
 import Pagination from "@/components/Pagination";
 
 const SENDS_PAGE_SIZE = 25;
-type SequenceStepDraft = { template_id: number; delay_days: number };
 
 type SendRow = {
   id: number;
@@ -57,7 +54,6 @@ export default function OutreachPage() {
   const [campaigns, setCampaigns] = useState<Record<string, unknown>[]>([]);
   const [queue, setQueue] = useState<Record<string, number>>({});
   const [templates, setTemplates] = useState<EmailTemplate[]>([]);
-  const [sequences, setSequences] = useState<EmailSequence[]>([]);
   const [scriptSets, setScriptSets] = useState<CampaignScriptSet[]>([]);
   const [scriptSelectionMode, setScriptSelectionMode] =
     useState<ScriptSelectionMode>("sequential");
@@ -69,15 +65,8 @@ export default function OutreachPage() {
   const [scriptSetMsg, setScriptSetMsg] = useState("");
   const [scriptSetForm, setScriptSetForm] = useState<CampaignScriptSetInput>({
     name: "",
+    step_delays: [0],
     scripts: [{ name: "Script 1", steps: [{ subject: "", body: "" }] }],
-  });
-  const [showSequenceForm, setShowSequenceForm] = useState(false);
-  const [editingSequenceId, setEditingSequenceId] = useState<number | null>(null);
-  const [sequenceBusy, setSequenceBusy] = useState(false);
-  const [sequenceMsg, setSequenceMsg] = useState("");
-  const [sequenceForm, setSequenceForm] = useState({
-    name: "",
-    steps: [{ template_id: 0, delay_days: 0 }] as SequenceStepDraft[],
   });
   const [sends, setSends] = useState<SendRow[]>([]);
   const [sendsTotal, setSendsTotal] = useState(0);
@@ -93,7 +82,6 @@ export default function OutreachPage() {
     max_per_day: number; max_per_hour: number;
     max_emails_per_minute: number;
     hourly_allocation_limit: number;
-    send_max_per_domain_per_hour: number;
     send_jitter_max_seconds: number;
     effective_hourly_allocation_limit: number;
     sent_today: number; sent_this_hour: number; paused: boolean;
@@ -106,9 +94,6 @@ export default function OutreachPage() {
   const [hourlyLimitInput, setHourlyLimitInput] = useState(60);
   const [hourlyLimitBusy, setHourlyLimitBusy] = useState(false);
   const [hourlyLimitMessage, setHourlyLimitMessage] = useState("");
-  const [domainLimitInput, setDomainLimitInput] = useState(10);
-  const [domainLimitBusy, setDomainLimitBusy] = useState(false);
-  const [domainLimitMessage, setDomainLimitMessage] = useState("");
   const [jitterInput, setJitterInput] = useState(0);
   const [jitterBusy, setJitterBusy] = useState(false);
   const [jitterMessage, setJitterMessage] = useState("");
@@ -136,6 +121,7 @@ export default function OutreachPage() {
   const [accountForm, setAccountForm] = useState({
     label: "", from_name: "", from_email: "", reply_to: "",
     smtp_host: "", smtp_port: 587, smtp_user: "", smtp_password: "", smtp_use_tls: true,
+    imap_host: "", imap_port: 993, imap_user: "", imap_password: "", imap_mailbox: "INBOX",
     daily_limit: 50, hourly_limit: 10, warmup_days: 0,
   });
 
@@ -156,21 +142,18 @@ export default function OutreachPage() {
       api.outreach.queue(),
       api.outreach.templates(),
       api.outreach.limits(),
-      api.outreach.sequences(),
       api.outreach.scriptSets(),
       api.outreach.scriptSelectionSettings(),
     ])
-      .then(([c, q, t, l, savedSequences, savedScriptSets, scriptSettings]) => {
+      .then(([c, q, t, l, savedScriptSets, scriptSettings]) => {
         setCampaigns(c as typeof campaigns);
         setQueue(q as typeof queue);
         setTemplates(t as typeof templates);
-        setSequences(savedSequences);
         setScriptSets(savedScriptSets);
         setScriptSelectionMode(scriptSettings.mode);
         setLimits(l as typeof limits);
         setRateLimitInput(l.max_emails_per_minute);
         setHourlyLimitInput(l.hourly_allocation_limit);
-        setDomainLimitInput(l.send_max_per_domain_per_hour);
         setJitterInput(l.send_jitter_max_seconds ?? 0);
       })
       .catch((e) => setError((e as Error).message))
@@ -197,10 +180,12 @@ export default function OutreachPage() {
       const payload = {
         ...accountForm,
         smtp_port: Number(accountForm.smtp_port),
+        imap_port: Number(accountForm.imap_port),
         daily_limit: Number(accountForm.daily_limit),
         hourly_limit: Number(accountForm.hourly_limit),
         warmup_days: Number(accountForm.warmup_days),
         ...(accountForm.smtp_password ? {} : { smtp_password: undefined }),
+        ...(accountForm.imap_password ? {} : { imap_password: undefined }),
       };
       if (editingAccountId) {
         await api.outreach.updateAccount(editingAccountId, payload);
@@ -210,7 +195,9 @@ export default function OutreachPage() {
       setAccountMsg(editingAccountId ? "Account updated." : "Account added.");
       setShowAccountForm(false);
       setEditingAccountId(null);
-      setAccountForm((f) => ({ ...f, from_email: "", smtp_password: "" }));
+      setAccountForm((f) => ({
+        ...f, from_email: "", smtp_password: "", imap_password: "",
+      }));
       loadAccounts();
     } catch (e) {
       setAccountMsg((e as Error).message);
@@ -247,6 +234,11 @@ export default function OutreachPage() {
       smtp_user: account.smtp_user ?? "",
       smtp_password: "",
       smtp_use_tls: account.smtp_use_tls,
+      imap_host: account.imap_host ?? "",
+      imap_port: account.imap_port ?? 993,
+      imap_user: account.imap_user ?? "",
+      imap_password: "",
+      imap_mailbox: account.imap_mailbox ?? "INBOX",
       daily_limit: account.daily_limit,
       hourly_limit: account.hourly_limit,
       warmup_days: account.warmup_days,
@@ -263,6 +255,18 @@ export default function OutreachPage() {
         `SMTP ${res.smtp_ok ? "OK" : "FAILED"}` +
         (res.errors.length ? ` — ${res.errors.join("; ")}` : "")
       );
+    } catch (e) {
+      setAccountMsg((e as Error).message);
+    } finally {
+      setAccountBusy(false);
+    }
+  }
+
+  async function testImapAccount(id: number) {
+    setAccountBusy(true); setAccountMsg("");
+    try {
+      const result = await api.outreach.testImapAccount(id);
+      setAccountMsg(`IMAP OK — connected to ${result.mailbox}.`);
     } catch (e) {
       setAccountMsg((e as Error).message);
     } finally {
@@ -353,68 +357,11 @@ export default function OutreachPage() {
     }
   }
 
-  function editSequence(sequence: EmailSequence) {
-    setEditingSequenceId(sequence.id);
-    setSequenceForm({
-      name: sequence.name,
-      steps: sequence.steps.map(({ template_id, delay_days }) => ({
-        template_id,
-        delay_days,
-      })),
-    });
-    setSequenceMsg("");
-    setShowSequenceForm(true);
-  }
-
-  async function saveSequence() {
-    const payload: EmailSequenceInput = {
-      name: sequenceForm.name.trim(),
-      steps: sequenceForm.steps,
-    };
-    if (!payload.name || payload.steps.some((step) => !step.template_id)) {
-      setSequenceMsg("Enter a sequence name and choose a script for every step.");
-      return;
-    }
-    setSequenceBusy(true);
-    setSequenceMsg("");
-    try {
-      if (editingSequenceId === null) {
-        await api.outreach.createSequence(payload);
-      } else {
-        await api.outreach.updateSequence(editingSequenceId, payload);
-      }
-      setSequences(await api.outreach.sequences());
-      setSequenceMsg(editingSequenceId === null ? "Sequence saved." : "Sequence updated.");
-      setShowSequenceForm(false);
-      setEditingSequenceId(null);
-    } catch (e) {
-      setSequenceMsg((e as Error).message);
-    } finally {
-      setSequenceBusy(false);
-    }
-  }
-
-  async function removeSequence(sequence: EmailSequence) {
-    if (!window.confirm(`Delete "${sequence.name}"? Existing campaigns keep their scheduled email snapshots.`)) {
-      return;
-    }
-    setSequenceBusy(true);
-    setSequenceMsg("");
-    try {
-      await api.outreach.deleteSequence(sequence.id);
-      setSequences(await api.outreach.sequences());
-      setSequenceMsg("Sequence deleted. Existing campaign steps were not changed.");
-    } catch (e) {
-      setSequenceMsg((e as Error).message);
-    } finally {
-      setSequenceBusy(false);
-    }
-  }
-
   function startNewScriptSet() {
     setEditingScriptSetId(null);
     setScriptSetForm({
       name: "",
+      step_delays: [0],
       scripts: [{ name: "Script 1", steps: [{ subject: "", body: "" }] }],
     });
     setScriptSetMsg("");
@@ -425,6 +372,7 @@ export default function OutreachPage() {
     setEditingScriptSetId(scriptSet.id);
     setScriptSetForm({
       name: scriptSet.name,
+      step_delays: [...scriptSet.step_delays],
       scripts: scriptSet.scripts.map((script) => ({
         name: script.name,
         steps: script.steps.map((step) => ({ ...step })),
@@ -455,8 +403,12 @@ export default function OutreachPage() {
     }
     if (new Set(scripts.map((script) => script.steps.length)).size !== 1) {
       setScriptSetMsg(
-        "All variants must have the same number of steps so campaign follow-up timing stays unchanged.",
+        "All variants must have the same number of steps so the shared campaign timing applies to each one.",
       );
+      return;
+    }
+    if (scriptSetForm.step_delays.length !== scripts[0].steps.length) {
+      setScriptSetMsg("Set a delay for every automation step.");
       return;
     }
 
@@ -465,6 +417,7 @@ export default function OutreachPage() {
     try {
       const payload: CampaignScriptSetInput = {
         name: scriptSetForm.name.trim(),
+        step_delays: scriptSetForm.step_delays,
         scripts,
       };
       if (editingScriptSetId === null) {
@@ -619,25 +572,6 @@ export default function OutreachPage() {
       setHourlyLimitMessage((e as Error).message);
     } finally {
       setHourlyLimitBusy(false);
-    }
-  }
-
-  async function saveDomainHourlyLimit() {
-    setDomainLimitBusy(true);
-    setDomainLimitMessage("");
-    try {
-      const result = await api.outreach.updateDomainHourlyLimit({
-        send_max_per_domain_per_hour: domainLimitInput,
-      });
-      setLimits((current) => current
-        ? { ...current, send_max_per_domain_per_hour: result.send_max_per_domain_per_hour }
-        : current);
-      setDomainLimitInput(result.send_max_per_domain_per_hour);
-      setDomainLimitMessage("Per-domain hourly limit saved.");
-    } catch (e) {
-      setDomainLimitMessage((e as Error).message);
-    } finally {
-      setDomainLimitBusy(false);
     }
   }
 
@@ -822,11 +756,6 @@ export default function OutreachPage() {
                   {" "}· {(3600 / limits.effective_hourly_allocation_limit).toFixed(2)} sec/slot
                 </span>
               </span>
-              <span>
-                Per recipient domain: <b className="text-white">
-                  {limits.send_max_per_domain_per_hour}
-                </b> emails/hour
-              </span>
               {limits.pause_active && (
                 <span className="text-amber-400">
                   Provider pause until {new Date(limits.paused_until!).toLocaleString()}
@@ -834,32 +763,6 @@ export default function OutreachPage() {
                 </span>
               )}
             </div>
-            {canManageAccounts && (
-              <div className="flex flex-wrap items-end gap-3 pt-2">
-                <label className="text-xs text-slate-400">
-                  Maximum emails per recipient domain per hour (1–10,000)
-                  <input
-                    type="number"
-                    min={1}
-                    max={10000}
-                    step={1}
-                    value={domainLimitInput}
-                    onChange={(e) => setDomainLimitInput(Number(e.target.value))}
-                    className="mt-1 w-36 bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-indigo-500/40"
-                  />
-                </label>
-                <button
-                  onClick={saveDomainHourlyLimit}
-                  disabled={domainLimitBusy || domainLimitInput < 1 || domainLimitInput > 10000}
-                  className="px-4 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 text-white text-xs font-semibold transition"
-                >
-                  {domainLimitBusy ? "Saving…" : "Save domain limit"}
-                </button>
-                {domainLimitMessage && (
-                  <span className="text-xs text-slate-400">{domainLimitMessage}</span>
-                )}
-              </div>
-            )}
             {canManageAccounts && (
               <div className="flex flex-wrap items-end gap-3 pt-2">
                 <label className="text-xs text-slate-400">
@@ -978,6 +881,10 @@ export default function OutreachPage() {
                 ["smtp_host", "SMTP host", "smtp.gmail.com"],
                 ["smtp_user", "SMTP user", "you@company.com"],
                 ["smtp_password", "SMTP password / app password", ""],
+                ["imap_host", "IMAP host", "imap.gmail.com"],
+                ["imap_user", "IMAP username", "you@company.com"],
+                ["imap_password", "IMAP password / app password", ""],
+                ["imap_mailbox", "IMAP mailbox", "INBOX"],
               ] as const).map(([key, label, placeholder]) => (
                 <label key={key} className="text-xs text-slate-400">
                   {label}
@@ -992,6 +899,7 @@ export default function OutreachPage() {
               ))}
               {([
                 ["smtp_port", "SMTP port"],
+                ["imap_port", "IMAP port (usually 993)"],
                 ["daily_limit", "Daily limit"],
                 ["hourly_limit", "Hourly limit"],
                 ["warmup_days", "Warmup days (0 = off)"],
@@ -1019,6 +927,10 @@ export default function OutreachPage() {
                 </select>
               </label>
             </div>
+            <p className="text-xs text-slate-500">
+              Configure IMAP for the mailbox that receives replies, usually this sender or its Reply-To address.
+              Per-account IMAP settings are recommended; server environment variables are only a legacy fallback.
+            </p>
             <button
               onClick={saveAccount}
               disabled={accountBusy || !accountForm.from_email || !accountForm.smtp_host}
@@ -1085,6 +997,13 @@ export default function OutreachPage() {
                           className="text-xs px-3 py-1.5 rounded-lg border border-white/10 bg-white/5 hover:bg-white/10 text-slate-300 transition disabled:opacity-40"
                         >
                           Test
+                        </button>
+                        <button
+                          onClick={() => testImapAccount(a.id)}
+                          disabled={accountBusy || !a.imap_host}
+                          className="text-xs px-3 py-1.5 rounded-lg border border-white/10 bg-white/5 hover:bg-white/10 text-slate-300 transition disabled:opacity-40"
+                        >
+                          Test inbox
                         </button>
                         <button
                           onClick={() => openTestEmail(a)}
@@ -1432,10 +1351,10 @@ export default function OutreachPage() {
         <div className="flex items-center justify-between mb-3">
           <div>
             <h2 className="text-sm font-semibold text-slate-400 uppercase tracking-wider">
-              Campaign script sets ({scriptSets.length})
+              Campaign automations ({scriptSets.length})
             </h2>
             <p className="mt-1 text-xs text-slate-500">
-              Selection mode applies to every script set in this organization. Each variant contains the full campaign copy; campaign timing comes from the selected sequence.
+              Each automation contains the full campaign copy and its follow-up schedule. Variants share the same timing.
             </p>
           </div>
           {canManageAccounts && (
@@ -1444,7 +1363,7 @@ export default function OutreachPage() {
               disabled={scriptSetBusy}
               className="text-xs px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 text-white font-medium transition"
             >
-              Create script set
+              Create campaign automation
             </button>
           )}
         </div>
@@ -1471,7 +1390,7 @@ export default function OutreachPage() {
           )}
         </div>
         <p className="mb-3 text-xs text-slate-500">
-          When a set is edited, campaigns using it update for unassigned leads; assigned leads keep their saved copy for retries and every follow-up.
+          Set timing is copied when a campaign is created. Editing script copy updates unassigned leads; assigned leads keep their saved copy for retries and every follow-up.
         </p>
         {scriptSetMsg && (
           <div className="mb-3 rounded-lg bg-white/5 border border-white/10 px-4 py-2 text-slate-300 text-xs">
@@ -1493,7 +1412,7 @@ export default function OutreachPage() {
               </button>
             </div>
             <p className="text-xs text-slate-400">
-              Add 1–5 variants. Each variant contains 1–4 step-specific subject/body pairs; every variant must have the same number of steps. Merge tags are rendered when each email is sent.
+              Add 1–5 variants, each with 1–4 step-specific subject/body pairs. All variants share the follow-up schedule below. Merge tags are rendered when each email is sent.
             </p>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
               <label className="text-xs text-slate-400">
@@ -1509,6 +1428,42 @@ export default function OutreachPage() {
                   className={`mt-1 ${inputCls}`}
                 />
               </label>
+            </div>
+            <div className="rounded-xl border border-white/8 bg-black/10 p-4">
+              <p className="mb-3 text-xs font-semibold uppercase tracking-wider text-slate-400">
+                Follow-up schedule (shared by all variants)
+              </p>
+              <div className="flex flex-wrap gap-3">
+                {scriptSetForm.step_delays.slice(1).map((delay, index) => (
+                  <label key={index + 1} className="flex items-center gap-2 text-xs text-slate-400">
+                    Follow-up {index + 1}
+                    <input
+                      type="number"
+                      min={0}
+                      max={365}
+                      value={delay}
+                      onChange={(e) => setScriptSetForm((form) => ({
+                        ...form,
+                        step_delays: form.step_delays.map((days, stepIndex) => (
+                          stepIndex === index + 1
+                            ? Math.min(365, Math.max(0, Number(e.target.value) || 0))
+                            : days
+                        )),
+                      }))}
+                      className="w-16 bg-white/5 border border-white/10 rounded-lg px-2 py-2 text-sm text-white text-center focus:outline-none"
+                    />
+                    days after previous
+                  </label>
+                ))}
+                {scriptSetForm.step_delays.length === 1 && (
+                  <span className="text-xs text-slate-500">
+                    Add follow-up steps to configure their delays.
+                  </span>
+                )}
+              </div>
+              <p className="mt-3 text-xs text-slate-500">
+                Existing campaign schedules do not change when these delays are edited.
+              </p>
             </div>
             <div className="space-y-3">
               {scriptSetForm.scripts.map((script, scriptIndex) => (
@@ -1572,11 +1527,16 @@ export default function OutreachPage() {
                         <button
                           onClick={() => setScriptSetForm((form) => ({
                             ...form,
-                            scripts: form.scripts.map((item, index) => (
-                              index === scriptIndex
-                                ? { ...item, steps: item.steps.filter((_, i) => i !== stepIndex) }
-                                : item
-                            )),
+                            scripts: form.scripts.map((item) => ({
+                              ...item,
+                              steps: item.steps.filter((_, i) => i !== stepIndex),
+                            })),
+                            step_delays: [
+                              0,
+                              ...form.step_delays
+                                .filter((_, i) => i !== stepIndex)
+                                .slice(1),
+                            ],
                           }))}
                           disabled={scriptSetBusy || script.steps.length <= 1}
                           className="text-xs text-red-300 disabled:opacity-30"
@@ -1637,14 +1597,11 @@ export default function OutreachPage() {
                   <button
                     onClick={() => setScriptSetForm((form) => ({
                       ...form,
-                      scripts: form.scripts.map((item, index) => (
-                        index === scriptIndex
-                          ? {
-                            ...item,
-                            steps: [...item.steps, { subject: "", body: "" }],
-                          }
-                          : item
-                      )),
+                      scripts: form.scripts.map((item) => ({
+                        ...item,
+                        steps: [...item.steps, { subject: "", body: "" }],
+                      })),
+                      step_delays: [...form.step_delays, 3],
                     }))}
                     disabled={scriptSetBusy || script.steps.length >= 4}
                     className="text-xs text-indigo-400 hover:text-indigo-300 disabled:opacity-30"
@@ -1687,7 +1644,7 @@ export default function OutreachPage() {
         )}
         {scriptSets.length === 0 ? (
           <div className="rounded-xl border border-white/8 bg-white/3 px-5 py-5 text-sm text-slate-500">
-            No campaign script sets yet. Create one to assign full sequence variants to campaign leads.
+            No campaign automations yet. Create one to launch a campaign from the Leads page.
           </div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
@@ -1698,6 +1655,13 @@ export default function OutreachPage() {
                     <p className="font-medium text-white">{scriptSet.name}</p>
                     <p className="mt-1 text-xs text-slate-500">
                       {scriptSet.scripts.length} variants · {scriptSet.scripts[0]?.steps.length ?? 0} steps
+                    </p>
+                    <p className="mt-1 text-xs text-slate-500">
+                      {scriptSet.step_delays.slice(1).length
+                        ? scriptSet.step_delays.slice(1).map((days, index) => (
+                          `Follow-up ${index + 1}: ${days}d`
+                        )).join(" · ")
+                        : "No follow-ups"}
                     </p>
                     <ol className="mt-3 space-y-2">
                       {scriptSet.scripts.map((script, index) => (
@@ -1737,179 +1701,6 @@ export default function OutreachPage() {
         )}
       </div>
 
-      {/* Reusable sequences */}
-      <div>
-        <div className="flex items-center justify-between mb-3">
-          <div>
-            <h2 className="text-sm font-semibold text-slate-400 uppercase tracking-wider">
-              Sequences ({sequences.length})
-            </h2>
-            <p className="mt-1 text-xs text-slate-500">
-              Start with one email; add up to three optional follow-ups.
-            </p>
-          </div>
-        </div>
-        {sequenceMsg && (
-          <div className="mb-3 rounded-lg bg-white/5 border border-white/10 px-4 py-2 text-slate-300 text-xs">
-            {sequenceMsg}
-          </div>
-        )}
-        {showSequenceForm && (
-          <div className="mb-4 rounded-2xl border border-white/8 bg-white/3 p-4 space-y-3">
-            <div className="flex items-center justify-between gap-3">
-              <h3 className="text-sm font-semibold text-white">
-                Edit sequence
-              </h3>
-              <button
-                onClick={() => setShowSequenceForm(false)}
-                disabled={sequenceBusy}
-                className="text-xs text-slate-400 hover:text-white disabled:opacity-40"
-              >
-                Cancel
-              </button>
-            </div>
-            <label className="block text-xs text-slate-400">
-              Sequence name
-              <input
-                type="text"
-                maxLength={120}
-                value={sequenceForm.name}
-                onChange={(e) => setSequenceForm((form) => ({ ...form, name: e.target.value }))}
-                className={`mt-1 ${inputCls}`}
-                placeholder="e.g. Initial email + follow-ups"
-              />
-            </label>
-            <div className="space-y-2">
-              <div className="flex items-center justify-between">
-                <p className="text-xs text-slate-400 uppercase tracking-wider font-semibold">
-                  Emails in order
-                </p>
-                <button
-                  onClick={() => setSequenceForm((form) => ({
-                    ...form,
-                    steps: [...form.steps, { template_id: 0, delay_days: 3 }],
-                  }))}
-                  disabled={sequenceForm.steps.length >= 4 || sequenceBusy}
-                  className="text-xs text-indigo-400 hover:text-indigo-300 disabled:opacity-40"
-                >
-                  + Add follow-up
-                </button>
-              </div>
-              {sequenceForm.steps.map((step, index) => (
-                <div key={index} className="flex items-center gap-2">
-                  <span className="w-5 text-xs text-slate-500 font-mono">{index + 1}</span>
-                  <select
-                    value={step.template_id}
-                    onChange={(e) => setSequenceForm((form) => ({
-                      ...form,
-                      steps: form.steps.map((item, itemIndex) => itemIndex === index
-                        ? { ...item, template_id: Number(e.target.value) }
-                        : item),
-                    }))}
-                    className={`flex-1 ${inputCls} [&>option]:bg-slate-900 [&>option]:text-white`}
-                  >
-                    <option value={0}>Choose an email script</option>
-                    {templates.map((template) => (
-                      <option key={template.id} value={template.id}>{template.name}</option>
-                    ))}
-                  </select>
-                  {index === 0 ? (
-                    <span className="text-xs text-slate-500 whitespace-nowrap">Initial email</span>
-                  ) : (
-                    <label className="flex items-center gap-1.5 text-xs text-slate-400 whitespace-nowrap">
-                      <input
-                        type="number"
-                        min={0}
-                        max={365}
-                        value={step.delay_days}
-                        onChange={(e) => setSequenceForm((form) => ({
-                          ...form,
-                          steps: form.steps.map((item, itemIndex) => itemIndex === index
-                            ? { ...item, delay_days: Math.min(365, Math.max(0, Number(e.target.value) || 0)) }
-                            : item),
-                        }))}
-                        className="w-16 bg-white/5 border border-white/10 rounded-lg px-2 py-2 text-sm text-white text-center focus:outline-none"
-                      />
-                      days after previous
-                    </label>
-                  )}
-                  {index > 0 && (
-                    <button
-                      onClick={() => setSequenceForm((form) => ({
-                        ...form,
-                        steps: form.steps.filter((_, itemIndex) => itemIndex !== index),
-                      }))}
-                      disabled={sequenceBusy}
-                      className="text-slate-500 hover:text-red-400 text-lg leading-none px-1"
-                      title="Remove follow-up"
-                    >
-                      ×
-                    </button>
-                  )}
-                </div>
-              ))}
-              <p className="text-xs text-slate-500">
-                Follow-ups are sent only if no reply, unsubscribe, or bounce stops the sequence.
-              </p>
-            </div>
-            <button
-              onClick={saveSequence}
-              disabled={
-                sequenceBusy ||
-                !sequenceForm.name.trim() ||
-                sequenceForm.steps.some((step) => !step.template_id)
-              }
-              className="px-5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 text-white text-sm font-semibold transition"
-            >
-              {sequenceBusy ? "Saving…" : "Save sequence"}
-            </button>
-          </div>
-        )}
-        {sequences.length === 0 ? (
-          <div className="rounded-xl border border-white/8 bg-white/3 px-5 py-5 text-sm text-slate-500">
-            No saved sequences yet. Campaigns require a saved sequence for step timing.
-          </div>
-        ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-            {sequences.map((sequence) => (
-              <div key={sequence.id} className="rounded-xl border border-white/8 bg-white/3 px-5 py-4">
-                <div className="flex items-start justify-between gap-3">
-                  <div className="min-w-0">
-                    <p className="font-medium text-white mb-2">{sequence.name}</p>
-                    <ol className="space-y-1">
-                      {sequence.steps.map((step) => (
-                        <li key={step.step_number} className="text-xs text-slate-400">
-                          {step.step_number === 1
-                            ? `Initial email: ${step.template_name}`
-                            : `Follow-up ${step.step_number - 1} · ${step.delay_days} days after previous: ${step.template_name}`}
-                        </li>
-                      ))}
-                    </ol>
-                  </div>
-                  {canManageAccounts && (
-                    <div className="flex gap-2">
-                      <button
-                        onClick={() => editSequence(sequence)}
-                        disabled={sequenceBusy}
-                        className="text-xs px-3 py-1.5 rounded-lg border border-white/10 bg-white/5 hover:bg-white/10 text-slate-300 transition"
-                      >
-                        Edit
-                      </button>
-                      <button
-                        onClick={() => removeSequence(sequence)}
-                        disabled={sequenceBusy}
-                        className="text-xs px-3 py-1.5 rounded-lg border border-red-500/20 bg-red-500/5 hover:bg-red-500/10 text-red-300 transition"
-                      >
-                        Delete
-                      </button>
-                    </div>
-                  )}
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
     </div>
   );
 }

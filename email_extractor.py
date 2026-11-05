@@ -17,6 +17,7 @@ Install once:
 import asyncio
 import re
 import sys
+import time
 from urllib.parse import urljoin, urlparse
 
 # Playwright requires subprocess support, so use Proactor on Windows.
@@ -40,10 +41,8 @@ EMAIL_RE = re.compile(r"[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}")
 # content-richest pages (homepage, contact, about, services) kept early so
 # they're visited before the high-confidence-email early-stop can kick in.
 CONTACT_PATHS = [
-    "/", "/contact", "/contact-us", "/about", "/services",
-    "/contact.html", "/about-us", "/services.html",
-    "/team", "/our-team", "/people",
-    "/staff", "/leadership", "/management",
+    "/", "/contact", "/contact-us", "/about", "/about-us", "/services",
+    "/contact.html", "/team", "/our-team", "/people",
 ]
 
 # Subset of the above worth capturing body text from for personalization —
@@ -83,6 +82,10 @@ _NAMED_RE = re.compile(r"^[a-z]{2,}[._-][a-z]{2,}", re.IGNORECASE)
 # Generic guesses when nothing was scraped — low confidence, don't send
 # without manual review.
 PATTERN_GUESSES = ["info", "contact", "hello", "sales"]
+
+# A single slow/unresponsive site must not stall the whole enrichment phase.
+# Once this many seconds have been spent on one domain, stop trying more paths.
+DOMAIN_TIME_BUDGET = 40
 
 # Junk patterns that sneak through the regex but aren't real emails.
 JUNK_RE = re.compile(
@@ -147,18 +150,25 @@ def _same_or_related_domain(email, target_domain):
     return target_domain in addr_domain or addr_domain in target_domain
 
 
-def _scrape_page(page, url, capture_snippet=False):
+def _scrape_page(page, url, capture_snippet=False, seen_urls=None):
     """Visit a URL, return (mailto_emails, text_emails, snippet).
 
     snippet is None unless capture_snippet=True, in which case we collect
     title + first ~400 chars of meaningful body text for the personalizer.
+    seen_urls lets the caller skip pages that redirected to a URL we already
+    scraped (many sites send every unknown path back to the homepage).
     """
     mailto_emails = set()
     text_emails = set()
     snippet = None
     try:
-        response = page.goto(url, wait_until="domcontentloaded", timeout=12000)
-        page.wait_for_timeout(500)
+        response = page.goto(url, wait_until="domcontentloaded", timeout=8000)
+        final_url = (page.url or "").split("#")[0].rstrip("/").lower()
+        if final_url and seen_urls is not None:
+            if final_url in seen_urls:
+                return mailto_emails, text_emails, snippet
+            seen_urls.add(final_url)
+        page.wait_for_timeout(300)
         is_error_page = bool(response and response.status >= 400)
 
         # mailto: anchors — highest confidence signal
@@ -235,6 +245,9 @@ def extract_from_domain(domain, context):
     page = context.new_page()
     found = {}  # email -> best metadata (dedupe, keep highest confidence)
     snippet_sections = {}  # label -> text, e.g. "ABOUT" -> "..." (first hit per label wins)
+    seen_urls = set()  # final URLs already scraped (site-wide redirects)
+    paths_tried = 0
+    deadline = time.monotonic() + DOMAIN_TIME_BUDGET
 
     def _add(email, url, source_type, confidence):
         if _is_junk(email):
@@ -255,11 +268,14 @@ def extract_from_domain(domain, context):
 
     try:
         for path in CONTACT_PATHS:
+            if time.monotonic() >= deadline:
+                break
+            paths_tried += 1
             url = f"https://{domain}{path}"
             label = _SNIPPET_LABELS.get(path)
             capture = path in SNIPPET_PATHS and (label not in snippet_sections)
             mailto_emails, text_emails, snippet = _scrape_page(
-                page, url, capture_snippet=capture
+                page, url, capture_snippet=capture, seen_urls=seen_urls
             )
             if snippet and label and label not in snippet_sections:
                 snippet_sections[label] = snippet
@@ -275,9 +291,15 @@ def extract_from_domain(domain, context):
                     continue  # skip random third-party emails in page text
                 _add(email, url, "text", "medium")
 
-            # Early stop: got some high-confidence hits already
+            # Early stop: most domains surface a solid address on the
+            # homepage/contact page. Only keep digging through team pages
+            # when we haven't found one yet.
             high_hits = sum(1 for v in found.values() if v["confidence"] == "high")
             if high_hits >= 3:
+                break
+            if high_hits >= 1 and paths_tried >= 2:
+                break
+            if len(found) >= 3 and paths_tried >= 3:
                 break
     except Exception as e:
         result["error"] = str(e)[:200]

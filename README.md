@@ -23,7 +23,7 @@ Install the Python dependencies and start the API from the repository root:
 
 ```powershell
 python -m pip install -r requirements.txt
-python -m uvicorn api.main:app --reload
+python -m uvicorn api.main:app --reload --host 0.0.0.0
 ```
 
 Run the background workers in separate terminals when needed:
@@ -57,29 +57,36 @@ python -m pytest tests
 
 Organizations can add any number of named email scripts with their own subject
 and body. When using **Email now**, users must explicitly select the script to
-send. Admins can build reusable sequences
-with one initial email and up to three optional follow-ups, configure the delay
-between steps, and select a saved sequence when creating a campaign. Campaign
-steps snapshot their email copy when the campaign is created, so later template
-edits do not change already-scheduled messages. Replies, unsubscribes, bounces,
+send. Campaigns use saved campaign automations, with script variants and their
+shared follow-up delays configured together. Campaign steps snapshot their
+email copy and schedule when the campaign is created, so later edits do not
+change already-scheduled messages. Replies, unsubscribes, bounces,
 and suppressed recipients stop pending follow-ups.
 New leads are no longer automatically enrolled in the legacy four-step
 **Auto Outreach** flow. Emails already queued by that flow are left untouched
 and continue through the existing send queue.
 
-Campaigns can optionally use a saved set of up to five complete script
-variants. The organization-wide **Sequential** or **Random** setting applies
-to every script set. Sequential rotates through variants in order; Random
-shuffles a cycle so every variant is used once before any repeats. The next
-cycle avoids starting with the previous cycle's last variant when there is
-more than one variant. Rotation state is persisted per campaign. Changing the
-setting also affects unassigned leads in existing campaigns, while each lead's
-saved assignment remains unchanged. Variants must have the same number of steps
-as the campaign sequence; the selected sequence continues to control follow-up
-timing. A lead's variant is snapshotted when its first email is claimed for sending, so
-retries and follow-ups keep the same copy. Editing a set affects only leads
-that have not yet been assigned a variant. Campaigns without a selected set
-keep using their sequence's existing templates.
+Campaign automations remain available for campaigns using inline script
+variants. When the Leads builder uses automatic script bundles, all eligible
+four-step variants from the organization's campaign automations form one
+selection pool; the user does not select an individual automation. Bundles
+must share the same four step delays. At enrollment the organization-wide
+**Sequential** round-robin or **Random** shuffled-cycle setting assigns and
+snapshots one bundle per lead. The scheduler automatically queues all four
+steps at their configured intervals using that saved copy for retries and
+follow-ups. Later mode changes do not alter existing assignments.
+
+The Leads builder also supports attaching multiple saved four-step sequences
+(Initial -> Bump -> Value -> Break-up). Selected sequences must share their
+follow-up delays; one sequence and its copy snapshot are assigned per lead at
+enrollment using the same organization selection setting. Existing lead
+assignments are preserved when campaign options are updated.
+
+The template-option feature requires the additive
+`scripts/migrate_campaign_template_options.py` migration before it is enabled.
+It is intentionally not run automatically during application startup. Review
+and apply it as a separate, explicitly approved database operation. The
+development database has already had this migration applied.
 
 ## Maintenance commands
 
